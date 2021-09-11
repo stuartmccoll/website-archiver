@@ -9,7 +9,6 @@ namespace WebsiteArchiver
         static async Task Main(string[] args)
         {
             Archiver archiver = new();
-
             await archiver.Crawl();
         }
     }
