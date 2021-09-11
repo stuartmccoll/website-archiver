@@ -29,7 +29,9 @@ namespace WebsiteArchiver
         /// <returns>An awaitable Task.</returns>
         async public Task Crawl()
         {
-            HtmlDocument htmlDoc = web.Load("http://www.stuartmccoll.co.uk");
+            HtmlDocument htmlDoc = web.Load(
+                Environment.GetEnvironmentVariable("DOMAIN")
+            );
 
             await this.CrawlCascadingStyleSheet(htmlDoc);
 
@@ -53,7 +55,7 @@ namespace WebsiteArchiver
             foreach (HtmlNode stylesheet in stylesheets)
             {
                 string address = stylesheet.Attributes["href"].Value.Replace(
-                    "https://stuartmccoll.github.io/",
+                    Environment.GetEnvironmentVariable("DOMAIN"),
                     ""
                 );
 
@@ -66,12 +68,8 @@ namespace WebsiteArchiver
 
                 HttpClient client = new();
 
-                Console.WriteLine(
-                    $"https://stuartmccoll.github.io{stylesheet.Attributes["href"].Value}"
-                );
-
                 using var stream = await client.GetStreamAsync(
-                    $"https://stuartmccoll.github.io{stylesheet.Attributes["href"].Value}"
+                    $"{Environment.GetEnvironmentVariable("DOMAIN")stylesheet.Attributes["href"].Value}"
                 );
 
                 StreamReader reader = new StreamReader(stream);
@@ -136,7 +134,7 @@ namespace WebsiteArchiver
             {
                 if (
                     !link.Attributes["href"].Value.StartsWith(
-                        "https://stuartmccoll.github.io"
+                        Environment.GetEnvironmentVariable("DOMAIN")
                     ) ||
                     link.Attributes["href"].Value.EndsWith(".xml")
                 )
@@ -189,7 +187,10 @@ namespace WebsiteArchiver
         /// <returns>An awaitable Task.</returns>
         private async Task StoreDocument(HtmlDocument htmlDoc, String address)
         {
-            string fileName = address.Replace("https://stuartmccoll.github.io/", "");
+            string fileName = address.Replace(
+                Environment.GetEnvironmentVariable("DOMAIN"),
+                ""
+            );
 
             if (fileName.EndsWith("/"))
                 fileName = fileName.Remove(fileName.Length - 1, 1);
