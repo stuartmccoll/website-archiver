@@ -59,8 +59,12 @@ namespace WebsiteArchiver
         /// <returns>A configured BlobContainerClient.</returns>
         private BlobContainerClient GetBlobContainerClient()
         {
-            String connection = "";
-            String containerName = "";
+            String connection = Environment.GetEnvironmentVariable(
+                "AZURE_BLOB_STORAGE_CONNECTION_STRING"
+            );
+            String containerName = Environment.GetEnvironmentVariable(
+                "AZURE_BLOB_STORAGE_CONTAINER_NAME"
+            );
 
             BlobServiceClient serviceClient = new BlobServiceClient(connection);
 
