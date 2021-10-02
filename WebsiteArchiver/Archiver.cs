@@ -69,7 +69,7 @@ namespace WebsiteArchiver
                 HttpClient client = new();
 
                 using var stream = await client.GetStreamAsync(
-                    $"{Environment.GetEnvironmentVariable("DOMAIN")stylesheet.Attributes["href"].Value}"
+                    $"{Environment.GetEnvironmentVariable("DOMAIN")}{stylesheet.Attributes["href"].Value}"
                 );
 
                 StreamReader reader = new StreamReader(stream);
