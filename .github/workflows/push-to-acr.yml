@@ -14,7 +14,7 @@ jobs:
       - name: Login to Azure Container Registry
         uses: azure/docker-login@v1
         with:
-          login-server: ${{ secrets.REGISTRY_NAME }}
+          login-server: ${{ secrets.ACR_REGISTRY_NAME }}
           username: ${{ secrets.AZ_SP_CLIENT_ID }}
           password: ${{ secrets.AZ_SP_CLIENT_SECRET }}
 
@@ -26,7 +26,9 @@ jobs:
           echo DOMAIN=${{ secrets.DOMAIN }} >> .env
 
       - name: Build Docker image
-        run: docker-compose build 
+        run: |
+          cd WebsitrArchiver
+          docker-compose build
 
       - name: Push Docker image to Azure Container Registry
         run: docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/website-archiver:${ github.sha }
