@@ -11,13 +11,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@main
-    
-      - name: Login to Azure Container Registry
-        uses: azure/docker-login@v1
-        with:
-          login-server: ${{ secrets.ACR_REGISTRY_NAME }}
-          username: ${{ secrets.AZ_SP_CLIENT_ID }}
-          password: ${{ secrets.AZ_SP_CLIENT_SECRET }}
 
       - name: Create .env file
         run: |
@@ -26,17 +19,20 @@ jobs:
           echo AZURE_BLOB_STORAGE_CONTAINER_NAME=${{ secrets.AZURE_BLOB_STORAGE_CONTAINER_NAME }} >> WebsiteArchiver/.env
           echo DOMAIN=${{ secrets.DOMAIN }} >> WebsiteArchiver/.env
 
+      - name: Login to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.ACR_REGISTRY_NAME }}
+          username: ${{ secrets.AZ_SP_CLIENT_ID }}
+          password: ${{ secrets.AZ_SP_CLIENT_SECRET }}
+
       - name: Build Docker image
         run: |
           cd WebsiteArchiver
           docker-compose build
 
       - name: Push Docker image to Azure Container Registry
-        uses: azure/docker-login@v1
-        with:
-          login-server: ${{ secrets.ACR_REGISTRY_NAME }}
-          username: ${{ secrets.AZ_SP_CLIENT_ID }}
-          password: ${{ secrets.AZ_SP_CLIENT_SECRET }}
         run: |
+          echo ${DOCKER_CONFIG}
           docker tag websitearchiver:latest ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver:${{ github.sha }}
           docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver:${{ github.sha }}
