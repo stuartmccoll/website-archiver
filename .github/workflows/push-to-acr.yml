@@ -20,10 +20,10 @@ jobs:
 
       - name: Create .env file
         run: |
-          touch .env
-          echo AZURE_BLOB_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_BLOB_STORAGE_CONNECTION_STRING }} >> .env
-          echo AZURE_BLOB_STORAGE_CONTAINER_NAME=${{ secrets.AZURE_BLOB_STORAGE_CONTAINER_NAME }} >> .env
-          echo DOMAIN=${{ secrets.DOMAIN }} >> .env
+          touch WebsiteArchiver/.env
+          echo AZURE_BLOB_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_BLOB_STORAGE_CONNECTION_STRING }} >> WebsiteArchiver/.env
+          echo AZURE_BLOB_STORAGE_CONTAINER_NAME=${{ secrets.AZURE_BLOB_STORAGE_CONTAINER_NAME }} >> WebsiteArchiver/.env
+          echo DOMAIN=${{ secrets.DOMAIN }} >> WebsiteArchiver/.env
 
       - name: Build Docker image
         run: |
