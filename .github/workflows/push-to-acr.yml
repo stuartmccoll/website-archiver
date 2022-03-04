@@ -32,4 +32,6 @@ jobs:
           docker-compose build
 
       - name: Push Docker image to Azure Container Registry
-        run: docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver_websitearchiver
+        run: |
+          docker images
+          docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver_websitearchiver
