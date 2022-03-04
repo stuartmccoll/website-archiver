@@ -34,4 +34,4 @@ jobs:
       - name: Push Docker image to Azure Container Registry
         run: |
           docker images
-          docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io
+          docker push websitearchiver:latest
