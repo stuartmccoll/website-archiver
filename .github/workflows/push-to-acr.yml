@@ -31,4 +31,4 @@ jobs:
           docker-compose build
 
       - name: Push Docker image to Azure Container Registry
-        run: docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/website-archiver:${{ github.sha }}
+        run: docker push websitearchiver_websitearchiver
