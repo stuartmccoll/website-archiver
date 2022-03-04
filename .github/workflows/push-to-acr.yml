@@ -32,6 +32,11 @@ jobs:
           docker-compose build
 
       - name: Push Docker image to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.ACR_REGISTRY_NAME }}
+          username: ${{ secrets.AZ_SP_CLIENT_ID }}
+          password: ${{ secrets.AZ_SP_CLIENT_SECRET }}
         run: |
-          docker tag websitearchiver:latest websitearchiver.azurecr.io/test:${{ github.sha }}
-          docker push websitearchiver.azurecr.io/test:${{ github.sha }}
+          docker tag websitearchiver:latest ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver:${{ github.sha }}
+          docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver:${{ github.sha }}
