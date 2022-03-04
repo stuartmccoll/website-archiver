@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - devops/gha-workflow-update-2
 
 jobs:
   push-to-azure-container-registry:
