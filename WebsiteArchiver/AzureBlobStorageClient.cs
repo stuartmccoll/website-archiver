@@ -63,7 +63,11 @@ namespace WebsiteArchiver
                 "AZURE_BLOB_STORAGE_CONNECTION_STRING"
             );
 
+            Console.WriteLine($"Secret is: {secret}");
+
             String connection = $"DefaultEndpointsProtocol=https;AccountName=websitearchiver;AccountKey={secret};EndpointSuffix=core.windows.net";
+
+            Console.WriteLine($"Full connection string is: {connection}");
 
             String containerName = Environment.GetEnvironmentVariable(
                 "AZURE_BLOB_STORAGE_CONTAINER_NAME"
