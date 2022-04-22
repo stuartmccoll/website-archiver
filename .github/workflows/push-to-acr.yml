@@ -33,6 +33,5 @@ jobs:
 
       - name: Push Docker image to Azure Container Registry
         run: |
-          echo ${DOCKER_CONFIG}
           docker tag websitearchiver:latest ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver:${{ github.sha }}
           docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver:${{ github.sha }}
