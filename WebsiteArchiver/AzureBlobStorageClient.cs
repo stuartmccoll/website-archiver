@@ -59,9 +59,11 @@ namespace WebsiteArchiver
         /// <returns>A configured BlobContainerClient.</returns>
         private BlobContainerClient GetBlobContainerClient()
         {
-            String connection = $"DefaultEndpointsProtocol=https;AccountName=websitearchiver;AccountKey={Environment.GetEnvironmentVariable(
+            String secret = Environment.GetEnvironmentVariable(
                 "AZURE_BLOB_STORAGE_CONNECTION_STRING"
-            )};EndpointSuffix=core.windows.net";
+            );
+
+            String connection = $"DefaultEndpointsProtocol=https;AccountName=websitearchiver;AccountKey={secret};EndpointSuffix=core.windows.net";
 
             String containerName = Environment.GetEnvironmentVariable(
                 "AZURE_BLOB_STORAGE_CONTAINER_NAME"
