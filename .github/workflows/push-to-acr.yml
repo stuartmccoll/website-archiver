@@ -29,7 +29,6 @@ jobs:
       - name: Build Docker image
         run: |
           cd WebsiteArchiver
-          cat .env
           docker-compose build
 
       - name: Push Docker image to Azure Container Registry
