@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - main
-      - devops/multi-tag
 
 jobs:
   push-to-azure-container-registry:
@@ -37,4 +36,3 @@ jobs:
           docker tag websitearchiver:latest ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver:latest
           docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver:${{ github.sha }}
           docker push ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io/websitearchiver:latest
-
