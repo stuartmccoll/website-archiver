@@ -1,0 +1,58 @@
+# Weekly pull requests for outdated dependencies. Minor and patch updates
+# are grouped into one pull request per ecosystem; major updates get their
+# own. New versions must be a week old before they're proposed, which
+# avoids picking up releases that are quickly withdrawn.
+version: 2
+
+updates:
+  - package-ecosystem: nuget
+    directories:
+      - /WebsiteArchiver
+      - /WebsiteArchiver.Tests
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      nuget-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Base images in the Dockerfile (dotnet/sdk and dotnet/runtime)
+  - package-ecosystem: docker
+    directory: /WebsiteArchiver
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      docker-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Pinned Azurite and Azure CLI images in docker-compose.local.yml
+  - package-ecosystem: docker-compose
+    directory: /WebsiteArchiver
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      docker-compose-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
