@@ -1,6 +1,9 @@
 ﻿services:
   websitearchiver:
     build: .
+    # Optional, so the image can be built without one; running it needs
+    # DOMAIN and the AZURE_BLOB_STORAGE_* variables (see CLAUDE.md)
     env_file:
-        - .env
+      - path: .env
+        required: false
     image: websitearchiver:latest

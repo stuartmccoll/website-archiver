@@ -15,7 +15,7 @@ The owner runs it only against their own personal website, so `DOMAIN` is truste
   - `AzureBlobStorageClient.cs`: writes each file to a temp file next to the assembly, uploads it, then deletes the temp file. Blob names are prefixed with the date in `ddMMyyyy` format, e.g. `09112026/blog/post.html`, so each run is a new snapshot
 - `WebsiteArchiver.Tests/`: xUnit end-to-end tests (see Testing)
 - `.github/workflows/pull-request-checks.yml`: on pull requests to `main`, runs `dotnet test` and builds the Docker image without pushing it. It can also be run manually
-- `.github/workflows/push-to-acr.yml`: on every push to `main`, builds the Docker image and pushes it to Azure Container Registry, tagged with the commit SHA and `latest`
+- `.github/workflows/publish-image.yml`: on every push to `main`, runs the tests, then builds the image and pushes it to `ghcr.io/stuartmccoll/websitearchiver`, tagged with the commit SHA and `latest`. It authenticates with `GITHUB_TOKEN`, so it needs no secrets. The image is run by the archival workflow in the `stuartmccoll/stuartmccoll.github.io` repo
 
 ## Configuration
 
@@ -27,7 +27,7 @@ All configuration comes from environment variables, read with `Environment.GetEn
 | `AZURE_BLOB_STORAGE_CONNECTION_STRING` | Connection string for the storage account (use `UseDevelopmentStorage=true` with the Azurite emulator) |
 | `AZURE_BLOB_STORAGE_CONTAINER_NAME` | Container the blobs are uploaded to |
 
-For Docker, these go in `WebsiteArchiver/.env`, which git ignores. Never commit real values. In CI, the values come from GitHub secrets.
+For Docker, these go in `WebsiteArchiver/.env`, which git ignores. Never commit real values. `.env` is optional for `docker compose build`. Whatever runs the image must pass the variables in itself.
 
 ## Commands
 
@@ -77,9 +77,10 @@ How the tests are organised:
 - C# style used in the existing code: braces on their own lines (Allman), 4-space indents, `this.` on member access, `///` XML doc comments on every method, and block-scoped `namespace WebsiteArchiver { ... }`
 - Source files are UTF-8 with BOM. Keep it that way, and don't let edits strip it
 - `.gitattributes` sets `* text=auto`
-- Commit to a branch and open a PR rather than pushing to `main`, because every push to `main` publishes an image to ACR
+- Commit to a branch and open a PR rather than pushing to `main`, because every push to `main` publishes the `latest` image that the website's archival workflow runs
 
 ## Docker notes
 
+- `Program.Main` must catch every exception and return an exit code. The app runs as PID 1 in the container, and Linux ignores SIGABRT for PID 1 unless it has a handler, so an unhandled .NET exception leaves the process hanging instead of exiting, unless the container was started with `--init`
 - The Dockerfile is multi-stage: `sdk` builds, then a runtime image runs `dotnet ./app/bin/Release/net/WebsiteArchiver.dll`
 - The build context is `WebsiteArchiver/`, so `.dockerignore` lives there too. It keeps `bin/`, `obj/` and `.env` out of the image build
