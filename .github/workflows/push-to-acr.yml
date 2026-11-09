@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
 
       - name: Create .env file
         run: |
@@ -19,16 +19,16 @@ jobs:
           echo DOMAIN=${{ secrets.DOMAIN }} >> WebsiteArchiver/.env
 
       - name: Login to Azure Container Registry
-        uses: azure/docker-login@v1
+        uses: docker/login-action@v4
         with:
-          login-server: ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io
+          registry: ${{ secrets.ACR_REGISTRY_NAME }}.azurecr.io
           username: ${{ secrets.AZ_SP_CLIENT_ID }}
           password: ${{ secrets.AZ_SP_CLIENT_SECRET }}
 
       - name: Build Docker image
         run: |
           cd WebsiteArchiver
-          docker-compose build
+          docker compose build
 
       - name: Push Docker image to Azure Container Registry
         run: |
