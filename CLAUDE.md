@@ -14,7 +14,10 @@ The owner runs it only against their own personal website, so `DOMAIN` is truste
   - `Archiver.cs`: crawling logic (HtmlAgilityPack). It loads `DOMAIN`, uploads its on-site stylesheets and the home page (as `main.html`), then recursively follows `<a href>` links. Every `href` is resolved against the page it appears on with `Uri`, and the query string and fragment are dropped, so each page is fetched once. A link is followed only if it has the same scheme and host as `DOMAIN`, sits under its path, and doesn't end in `.xml`. Fragment-only (`#...`) links are skipped, and the homepage is never fetched twice. Blob names come from the resolved path relative to `DOMAIN`: `.html` is added unless the path already ends in `.html` or `.htm`, so `python-3.7-data-classes/` becomes `python-3.7-data-classes.html`. If a page redirects, as GitHub Pages does from `/post` to `/post/`, it's stored, deduplicated and link-resolved under the address it redirected to. A page or stylesheet that can't be fetched, or returns a non-2xx status, is logged to stderr, added to `FailedAddresses` and skipped, and the crawl carries on. Only a failure to fetch the homepage throws
   - `AzureBlobStorageClient.cs`: writes each file to a temp file next to the assembly, uploads it, then deletes the temp file. Blob names are prefixed with the date in `ddMMyyyy` format, e.g. `09112026/blog/post.html`, so each run is a new snapshot
 - `WebsiteArchiver.Tests/`: xUnit end-to-end tests (see Testing)
-- `.github/workflows/pull-request-checks.yml`: on pull requests to `main`, runs `dotnet test` and builds the Docker image without pushing it. It can also be run manually
+- `.github/workflows/pull-request-checks.yml`: on pull requests to `main`, checks formatting (`dotnet format --verify-no-changes`), runs `dotnet test`, and builds the Docker image without pushing it. It can also be run manually
+- `.github/dependabot.yml`: weekly update pull requests for NuGet, the Dockerfile's base images, the images pinned in `docker-compose.local.yml`, and GitHub Actions. Minor and patch updates are grouped, and new versions wait a 7-day cooldown
+- `.claude/settings.json`: project permission allowlist for Claude Code. It pre-approves `dotnet build`, `dotnet test`, `dotnet list package` and `xxd -p`
+- `README.md`: overview for people browsing the repo. Keep it in step with behaviour changes
 - `.github/workflows/publish-image.yml`: on every push to `main`, runs the tests, then builds the image and pushes it to `ghcr.io/stuartmccoll/websitearchiver`, tagged with the commit SHA and `latest`. It authenticates with `GITHUB_TOKEN`, so it needs no secrets. The image is run by the archival workflow in the `stuartmccoll/stuartmccoll.github.io` repo
 
 ## Configuration
@@ -74,8 +77,8 @@ How the tests are organised:
 
 ## Conventions
 
-- C# style used in the existing code: braces on their own lines (Allman), 4-space indents, `this.` on member access, `///` XML doc comments on every method, and block-scoped `namespace WebsiteArchiver { ... }`
-- Source files are UTF-8 with BOM. Keep it that way, and don't let edits strip it
+- `.editorconfig` defines the C# style: braces on their own lines (Allman), 4-space indents, `this.` on instance members, `System` usings first, block-scoped namespaces, and UTF-8 with BOM for `.cs` files. CI enforces it, so run `dotnet format` before committing C# changes
+- Not enforced by tooling: `///` XML doc comments on every method
 - `.gitattributes` sets `* text=auto`
 - Commit to a branch and open a PR rather than pushing to `main`, because every push to `main` publishes the `latest` image that the website's archival workflow runs
 
