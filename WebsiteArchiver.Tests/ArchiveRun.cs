@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using WebsiteArchiver.Tests.Fakes;
 
 namespace WebsiteArchiver.Tests

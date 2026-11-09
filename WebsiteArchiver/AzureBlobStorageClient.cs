@@ -1,8 +1,8 @@
-﻿using Azure.Storage.Blobs;
-using System;
+﻿using System;
 using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
+using Azure.Storage.Blobs;
 
 namespace WebsiteArchiver
 {
@@ -12,7 +12,7 @@ namespace WebsiteArchiver
 
         public AzureBlobStorageClient()
         {
-            blobContainerClient = GetBlobContainerClient();
+            this.blobContainerClient = this.GetBlobContainerClient();
         }
 
         /// <summary>

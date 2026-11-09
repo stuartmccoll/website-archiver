@@ -1,4 +1,4 @@
-using WebsiteArchiver.Tests.Fakes;
+﻿using WebsiteArchiver.Tests.Fakes;
 
 // The archiver is configured through process-wide environment variables, so
 // tests must not run in parallel.
