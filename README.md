@@ -1,20 +1,34 @@
 # Website Archiver
 
-A small .NET console app that takes a snapshot of a website and stores it in Azure Blob Storage. It starts at the homepage and follows every link within the site. It saves each page's HTML and the site's stylesheets under a folder for the date of the run, so each run adds a new snapshot.
+A small .NET console app that takes a snapshot of a website and stores it in Azure Blob Storage. It starts at the homepage, follows every link within the site, and captures every page along with the files they use, such as stylesheets, images, scripts and icons. Each run adds a new snapshot, in its own folder.
 
 It's built to archive [stuartmccoll.github.io](https://stuartmccoll.github.io/) after each deployment, but it works with any site.
 
 ## How it works
 
-- **What it crawls:** it starts at `DOMAIN` and follows every `<a href>` on the same scheme and host, beneath `DOMAIN`'s path. Relative links are resolved against the page they appear on, using the address the page was actually served from after any redirects. Query strings and `#fragments` are ignored, so each page is fetched once.
-- **What it stores:**
-  - HTML pages, as `<date>/<path>.html`, e.g. `09112026/posts/my-post.html`. The homepage is stored as `main.html`.
-  - Stylesheets linked from the homepage.
+- **What it crawls:** it starts at `DOMAIN`. If that redirects, for example from `http` to `https`, it uses where it redirects to instead. It follows every `<a href>` on the same scheme and host, beneath that address's path. Relative links are resolved against the page they appear on, using the address the page was actually served from after any redirects. Query strings and `#fragments` are ignored, so each page is fetched once.
+- **What it captures:** every page, plus every file on the same host that a page, stylesheet or web app manifest refers to. That includes stylesheets, images (including `srcset`), scripts, favicons and touch icons, the web manifest and its icons, media, and anything referenced with `url(…)` or `@import` in CSS. These files can be anywhere on the host, even outside `DOMAIN`'s path. Each file is stored byte for byte, with the `Content-Type` it was served with, so PDFs, feeds and images are kept as they are.
 - **What it skips:**
-  - off-site links and stylesheets
-  - `mailto:`, `tel:` and `javascript:` links
-  - `.xml` files, such as feeds
-- **Failures:** a page or stylesheet that can't be fetched, or returns a status code other than 2xx, is logged and skipped, and the crawl carries on. If anything was skipped, the run finishes with exit code `1` and lists what failed.
+  - off-site links and files
+  - `mailto:`, `tel:`, `javascript:` and `data:` links
+- **Failures:** a file that can't be fetched, or returns a status code other than 2xx, is logged and skipped, and the crawl carries on. The snapshot is still published, marked `incomplete` with the addresses that failed, and the run finishes with exit code `1`.
+
+## How snapshots are stored
+
+```
+snapshots/index.json                     a list of every snapshot
+snapshots/2026-11-10T09-15-00Z/          one folder per run, named after its start time in UTC (with -2 added if two runs start in the same second)
+  manifest.json                          what the snapshot contains
+  site/index.html                        the homepage
+  site/posts/my-post/index.html          https://example.com/posts/my-post/
+  site/css/site.css                      https://example.com/css/site.css
+  original/…                             unmodified copies of the HTML, CSS and web manifests
+```
+
+- Paths mirror the site's URLs, so a page at `/posts/my-post/` is stored as `posts/my-post/index.html`.
+- `manifest.json` records when the run started and finished, whether it was complete, any addresses that failed, the redirects it followed, and each file's URL, path, `Content-Type`, size and SHA-256 hash.
+- `index.json` is updated last, so a snapshot only appears in it once all its files are uploaded. Two runs at the same time can't overwrite each other's entries.
+- Links inside the pages still point at the live site. Rewriting them so a snapshot can be browsed on its own is the next planned change. `original/` keeps the pages exactly as they were fetched, so the rewritten copies can be rebuilt.
 
 ## Configuration
 

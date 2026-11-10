@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -19,7 +20,7 @@ namespace WebsiteArchiver.Tests.Fakes
         public const string DomainPlaceholder = "{{DOMAIN}}";
 
         private readonly WebApplication app;
-        private readonly Dictionary<string, (string Body, string ContentType, int StatusCode)> pages = new();
+        private readonly Dictionary<string, (string? Text, byte[]? Bytes, string? ContentType, int StatusCode)> pages = new();
         private readonly Dictionary<string, string> redirects = new();
         private readonly ConcurrentQueue<string> requestedPaths = new();
 
@@ -68,6 +69,23 @@ namespace WebsiteArchiver.Tests.Fakes
             this.With(path, css, "text/css; charset=utf-8", StatusCodes.Status200OK);
 
         /// <summary>
+        /// Serves a text file at the given path with the given Content-Type.
+        /// Like pages, it may contain the domain placeholder.
+        /// </summary>
+        public FakeWebsite WithText(string path, string text, string contentType) =>
+            this.With(path, text, contentType, StatusCodes.Status200OK);
+
+        /// <summary>
+        /// Serves a file's bytes, unchanged, at the given path. A null
+        /// Content-Type sends no Content-Type header.
+        /// </summary>
+        public FakeWebsite WithFile(string path, byte[] contents, string? contentType)
+        {
+            this.pages[path] = (null, contents, contentType, StatusCodes.Status200OK);
+            return this;
+        }
+
+        /// <summary>
         /// Permanently redirects (301) one path to another, e.g. "/about"
         /// to "/about/", as static hosts such as GitHub Pages do.
         /// </summary>
@@ -82,7 +100,7 @@ namespace WebsiteArchiver.Tests.Fakes
         /// placeholder replaced.
         /// </summary>
         public string Rendered(string path) =>
-            this.pages[path].Body.Replace(DomainPlaceholder, this.Domain);
+            this.pages[path].Text!.Replace(DomainPlaceholder, this.Domain);
 
         public async ValueTask DisposeAsync()
         {
@@ -102,7 +120,7 @@ namespace WebsiteArchiver.Tests.Fakes
 
         private FakeWebsite With(string path, string body, string contentType, int statusCode)
         {
-            this.pages[path] = (body, contentType, statusCode);
+            this.pages[path] = (body, null, contentType, statusCode);
             return this;
         }
 
@@ -124,8 +142,12 @@ namespace WebsiteArchiver.Tests.Fakes
             }
 
             context.Response.StatusCode = page.StatusCode;
-            context.Response.ContentType = page.ContentType;
-            await context.Response.WriteAsync(this.Rendered(path));
+
+            if (page.ContentType != null)
+                context.Response.ContentType = page.ContentType;
+
+            byte[] body = page.Bytes ?? Encoding.UTF8.GetBytes(this.Rendered(path));
+            await context.Response.Body.WriteAsync(body);
         }
     }
 }

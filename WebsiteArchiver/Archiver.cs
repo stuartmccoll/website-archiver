@@ -1,72 +1,137 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
 using HtmlAgilityPack;
 
 namespace WebsiteArchiver
 {
+    /// <summary>
+    /// Crawls the site at DOMAIN into memory, then publishes everything it
+    /// captured as a snapshot.
+    /// </summary>
     public class Archiver
     {
+        // Every file is held in memory until the snapshot is published, so
+        // one very large file can't exhaust it
+        private const long MaxFileSize = 100 * 1024 * 1024;
 
-        private static readonly HttpClient httpClient = new();
+        private static readonly HttpClient httpClient = CreateHttpClient();
 
-        private AzureBlobStorageClient blobStorageClient;
-        private HtmlWeb web;
-        private HashSet<String> visitedLinks;
-        private List<String> failedAddresses;
+        private readonly Uri domainUri;
+        private readonly AzureBlobStorageClient blobStorageClient;
+        private readonly List<string> failedAddresses = new();
+        private readonly List<CapturedFile> files = new();
+        private readonly Dictionary<string, CapturedFile> filesByPath = new(StringComparer.Ordinal);
+        private readonly List<SnapshotRedirect> redirects = new();
+        private readonly Queue<Reference> queue = new();
+
+        // Addresses that have been queued, and addresses that have been
+        // fetched (or reached by a redirect), so each is fetched once
+        private readonly HashSet<string> queued = new();
+        private readonly HashSet<string> fetched = new();
+
         private Uri rootUri;
 
+        /// <summary>
+        /// Reads the configuration from environment variables.
+        /// </summary>
         /// <exception cref="InvalidOperationException">DOMAIN isn't set to
         /// an absolute http or https URL.</exception>
         public Archiver()
         {
             // Check DOMAIN first, so a missing value is reported clearly
             // rather than as a storage configuration error
-            this.rootUri = GetRootUri();
+            this.domainUri = GetDomainUri();
+            this.rootUri = this.domainUri;
             this.blobStorageClient = new();
-            this.web = new HtmlWeb();
-            this.visitedLinks = new HashSet<String>();
-            this.failedAddresses = new List<String>();
         }
 
         /// <summary>
-        /// Addresses of pages and stylesheets that couldn't be fetched
-        /// during the last crawl. These are skipped rather than archived.
+        /// Addresses that couldn't be fetched during the last crawl. These
+        /// are skipped rather than archived, and the snapshot is marked
+        /// incomplete.
         /// </summary>
-        public IReadOnlyList<String> FailedAddresses => this.failedAddresses;
+        public IReadOnlyList<string> FailedAddresses => this.failedAddresses;
 
         /// <summary>
-        /// Main method responsible for orchestrating crawling and storage
-        /// of all applicable pages.
+        /// The ID of the snapshot the last crawl published, e.g.
+        /// 2026-11-10T09-15-00Z, with -2 or similar added if another run
+        /// started in the same second.
+        /// </summary>
+        public string SnapshotId { get; private set; }
+
+        /// <summary>
+        /// Crawls the site, starting at its homepage, then publishes the
+        /// snapshot. Pages beneath the site root are crawled for links, and
+        /// every file they use on the same host is captured.
         /// </summary>
         /// <returns>An awaitable Task.</returns>
         /// <exception cref="InvalidOperationException">The homepage couldn't
         /// be fetched, so there is nothing to archive.</exception>
         async public Task Crawl()
         {
-            // Links back to the homepage shouldn't fetch or store it again
-            this.visitedLinks.Add(this.rootUri.AbsoluteUri);
+            DateTimeOffset startedAt = DateTimeOffset.UtcNow;
+            this.SnapshotId = Snapshot.CreateId(startedAt);
 
-            HtmlDocument htmlDoc = this.LoadPage(this.rootUri, out Uri homepageUri);
+            Reference homepageReference = new(this.domainUri, ReferenceKind.Page);
+            this.queued.Add(this.domainUri.AbsoluteUri);
+            this.fetched.Add(this.domainUri.AbsoluteUri);
 
-            if (htmlDoc == null)
-                throw new InvalidOperationException($"Couldn't fetch the homepage at {this.rootUri}");
+            FetchedResponse homepage = await this.Fetch(this.domainUri);
 
-            await this.CrawlCascadingStyleSheet(htmlDoc, homepageUri);
+            if (homepage == null)
+                throw new InvalidOperationException($"Couldn't fetch the homepage at {this.domainUri}");
 
-            await this.StoreDocument(htmlDoc, "main");
+            // If DOMAIN redirects, e.g. from http to https, the site's
+            // links point at where it redirects to
+            this.rootUri = new Uri(homepage.Address, ".");
 
-            await this.CrawlLinks(htmlDoc, homepageUri);
+            if (this.rootUri.AbsoluteUri != this.domainUri.AbsoluteUri)
+                Console.WriteLine($"{this.domainUri} redirects to {homepage.Address}, so crawling beneath {this.rootUri}");
+
+            CapturedFile homepageFile = this.Capture(homepageReference, homepage);
+
+            while (this.queue.TryDequeue(out Reference reference))
+            {
+                if (!this.fetched.Add(reference.Address.AbsoluteUri))
+                    continue;
+
+                FetchedResponse response = await this.Fetch(reference.Address);
+
+                if (response != null)
+                    this.Capture(reference, response);
+            }
+
+            SnapshotManifest manifest = new()
+            {
+                Id = this.SnapshotId,
+                Domain = this.domainUri.AbsoluteUri,
+                Root = this.rootUri.AbsoluteUri,
+                Homepage = homepageFile?.Path,
+                StartedAt = startedAt,
+                FinishedAt = DateTimeOffset.UtcNow,
+                Status = this.failedAddresses.Count == 0 ? "complete" : "incomplete",
+                FailedAddresses = this.failedAddresses.ToList(),
+                Redirects = this.redirects.ToList(),
+                Files = this.files.Select(Snapshot.Describe).ToList(),
+            };
+
+            this.SnapshotId = await Snapshot.Publish(this.blobStorageClient, manifest, this.files);
+
+            Console.WriteLine($"Published snapshot {this.SnapshotId} with {this.files.Count} file(s)");
         }
 
         /// <summary>
         /// Reads the DOMAIN environment variable, ensuring it ends with a
         /// trailing slash so that relative links resolve beneath it.
         /// </summary>
-        /// <returns>The root URL of the site being archived.</returns>
-        private static Uri GetRootUri()
+        /// <returns>The address the crawl starts from.</returns>
+        private static Uri GetDomainUri()
         {
             string domain = Environment.GetEnvironmentVariable("DOMAIN");
 
@@ -87,263 +152,204 @@ namespace WebsiteArchiver
         }
 
         /// <summary>
-        /// Crawls any cascading stylesheets on the current domain linked
-        /// from the given HTML document and orchestrates their storage in
-        /// Azure Blob Storage. Stylesheets hosted elsewhere, such as on a
-        /// CDN, are skipped.
+        /// Creates the HttpClient every request is made with. It follows
+        /// redirects, decompresses responses and gives up on a file after a
+        /// minute, or if it's larger than <see cref="MaxFileSize"/>.
         /// </summary>
-        /// <param name="htmlDoc">An HTML document.</param>
-        /// <param name="pageUri">The address of the HTML document, used to
-        /// resolve relative stylesheet links.</param>
-        /// <returns>An awaitable Task.</returns>
-        async private Task CrawlCascadingStyleSheet(HtmlDocument htmlDoc, Uri pageUri)
+        /// <returns>The HttpClient.</returns>
+        private static HttpClient CreateHttpClient()
         {
-            HtmlNodeCollection stylesheets = htmlDoc.DocumentNode.SelectNodes(
-                "//link[@rel='stylesheet'][@href]"
-            );
-
-            // SelectNodes returns null, not an empty collection, when
-            // nothing matches
-            if (stylesheets == null)
-                return;
-
-            foreach (HtmlNode stylesheet in stylesheets)
+            SocketsHttpHandler handler = new()
             {
-                Uri address = this.ResolveLink(pageUri, stylesheet.Attributes["href"].Value);
+                AllowAutoRedirect = true,
+                MaxAutomaticRedirections = 10,
+                AutomaticDecompression = DecompressionMethods.All,
+            };
 
-                if (address == null || !this.IsOnSite(address))
-                {
-                    Console.WriteLine($"Skipping off-site stylesheet {stylesheet.Attributes["href"].Value}");
-                    continue;
-                }
-
-                string fileName = address.AbsolutePath
-                    .Split("/")
-                    .LastOrDefault((value) => value != "");
-
-                if (fileName == null)
-                    continue;
-
-                Console.WriteLine($"Storing {fileName}");
-
-                string fileContents;
-
-                try
-                {
-                    fileContents = await httpClient.GetStringAsync(address);
-                }
-                catch (Exception exception) when (
-                    exception is HttpRequestException || exception is TaskCanceledException
-                )
-                {
-                    this.RecordFailure(address, exception.Message);
-                    continue;
-                }
-
-                await this.blobStorageClient.UploadBlob(fileName, "", fileContents);
-            }
-        }
-
-        /// <summary>
-        /// Parses the current document and builds a list of all links
-        /// (anchor tags with an href attribute) within the page that should
-        /// be crawled, resolved to absolute addresses. Links are excluded
-        /// if they are:
-        /// <list type="bullet">
-        /// <item>
-        /// <description>Not on the current domain.</description>
-        /// </item>
-        /// <item>
-        /// <description>Anything that can't be parsed as HTML, such as XML
-        /// files.</description>
-        /// </item>
-        /// <item>
-        /// <description>Fragment-only links (e.g. #top) to a part of the
-        /// current page.</description>
-        /// </item>
-        /// </list>
-        /// </summary>
-        /// <param name="htmlDoc">The current document</param>
-        /// <param name="pageUri">The address of the current document, used
-        /// to resolve relative links.</param>
-        /// <returns>A list of links to crawl, which is empty if the page has
-        /// none.</returns>
-        private List<Uri> GetAllLinks(HtmlDocument htmlDoc, Uri pageUri)
-        {
-            List<Uri> links = new List<Uri>();
-
-            HtmlNodeCollection anchors = htmlDoc.DocumentNode.SelectNodes("//a[@href]");
-
-            // SelectNodes returns null, not an empty collection, when
-            // nothing matches
-            if (anchors == null)
-                return links;
-
-            foreach (HtmlNode anchor in anchors)
+            HttpClient client = new(handler)
             {
-                string href = anchor.Attributes["href"].Value.Trim();
+                Timeout = TimeSpan.FromMinutes(1),
+                MaxResponseContentBufferSize = MaxFileSize,
+            };
 
-                if (href.StartsWith("#"))
-                    continue;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("WebsiteArchiver");
 
-                Uri link = this.ResolveLink(pageUri, href);
-
-                if (
-                    link != null &&
-                    this.IsOnSite(link) &&
-                    !link.AbsolutePath.EndsWith(".xml")
-                )
-                {
-                    links.Add(link);
-                }
-            }
-
-            return links;
+            return client;
         }
 
         /// <summary>
-        /// Retrieves all links in a given HTML page and orchestrates
-        /// crawling and storage of each.
+        /// Fetches a file, following any redirects.
         /// </summary>
-        /// <param name="htmlDoc">An HTML document.</param>
-        /// <param name="pageUri">The address of the HTML document.</param>
-        /// <returns>An awaitable Task.</returns>
-        private async Task CrawlLinks(HtmlDocument htmlDoc, Uri pageUri)
-        {
-            List<Uri> links = this.GetAllLinks(htmlDoc, pageUri);
-
-            foreach (Uri link in links)
-            {
-                await this.CrawlLink(link);
-            }
-        }
-
-        /// <summary>
-        /// Resolves a link, which may be absolute or relative, against the
-        /// address of the page it was found on. Any query string or fragment
-        /// (e.g. ?utm_source=nav or #top) is removed, so that each page is
-        /// fetched and stored once under a name derived from its path.
-        /// </summary>
-        /// <param name="pageUri">The address of the page containing the
-        /// link.</param>
-        /// <param name="href">The link's href attribute value.</param>
-        /// <returns>The absolute address of the link, or null if it can't be
-        /// parsed.</returns>
-        private Uri ResolveLink(Uri pageUri, string href)
-        {
-            if (!Uri.TryCreate(pageUri, HtmlEntity.DeEntitize(href).Trim(), out Uri link))
-                return null;
-
-            return new Uri(link.GetLeftPart(UriPartial.Path));
-        }
-
-        /// <summary>
-        /// Determines whether an address belongs to the site being archived:
-        /// same scheme, host and port as DOMAIN, and beneath its path.
-        /// </summary>
-        /// <param name="address">An absolute address.</param>
-        /// <returns>True if the address is on the site being
-        /// archived.</returns>
-        private bool IsOnSite(Uri address)
-        {
-            return address.Scheme == this.rootUri.Scheme &&
-                String.Equals(
-                    address.Authority,
-                    this.rootUri.Authority,
-                    StringComparison.OrdinalIgnoreCase
-                ) &&
-                address.AbsolutePath.StartsWith(this.rootUri.AbsolutePath, StringComparison.Ordinal);
-        }
-
-        /// <summary>
-        /// Visits a given link if it hasn't seen it before, handing the
-        /// document off for storage and continuing to crawl any further
-        /// links found. If the link redirects, as GitHub Pages does from
-        /// /post to /post/, the page is stored and crawled under the address
-        /// it redirected to, so it isn't archived twice and its relative
-        /// links resolve correctly.
-        /// </summary>
-        /// <param name="link">The absolute address of a page on the
-        /// site.</param>
-        /// <returns>An awaitable Task.</returns>
-        private async Task CrawlLink(Uri link)
-        {
-            String address = link.AbsoluteUri;
-
-            if (this.visitedLinks.Contains(address))
-            {
-                Console.WriteLine($"Already visited {address}");
-            }
-            else
-            {
-                this.visitedLinks.Add(address);
-
-                HtmlDocument htmlDoc = this.LoadPage(link, out Uri pageUri);
-
-                // Don't archive error pages, or follow their links
-                if (htmlDoc == null)
-                    return;
-
-                if (pageUri.AbsoluteUri != address)
-                {
-                    if (!this.IsOnSite(pageUri))
-                    {
-                        Console.WriteLine($"Skipping {address}, which redirects off-site to {pageUri}");
-                        return;
-                    }
-
-                    if (!this.visitedLinks.Add(pageUri.AbsoluteUri))
-                    {
-                        Console.WriteLine($"Already visited {pageUri} (redirected from {address})");
-                        return;
-                    }
-                }
-
-                await this.StoreDocument(htmlDoc, this.GetPathRelativeToRoot(pageUri));
-
-                Console.WriteLine($"Crawling {pageUri}");
-
-                await this.CrawlLinks(htmlDoc, pageUri);
-            }
-        }
-
-        /// <summary>
-        /// Fetches and parses a page.
-        /// </summary>
-        /// <param name="address">The address of the page.</param>
-        /// <param name="finalAddress">The address the page was actually
-        /// served from, after following any redirects, without a query
-        /// string or fragment.</param>
-        /// <returns>The parsed page, or null if it couldn't be fetched or
-        /// the server returned an unsuccessful status code. Failures are
+        /// <param name="address">The file's address.</param>
+        /// <returns>The response, or null if it couldn't be fetched or the
+        /// server returned an unsuccessful status code. Failures are
         /// recorded in <see cref="FailedAddresses"/>.</returns>
-        private HtmlDocument LoadPage(Uri address, out Uri finalAddress)
+        private async Task<FetchedResponse> Fetch(Uri address)
         {
-            HtmlDocument htmlDoc;
-            finalAddress = address;
+            Console.WriteLine($"Fetching {address}");
 
             try
             {
-                htmlDoc = this.web.Load(address.AbsoluteUri);
+                using HttpResponseMessage response = await httpClient.GetAsync(address);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    this.RecordFailure(address, $"HTTP status {(int)response.StatusCode}");
+                    return null;
+                }
+
+                return new FetchedResponse(
+                    new Uri(response.RequestMessage.RequestUri.GetLeftPart(UriPartial.Path)),
+                    await response.Content.ReadAsByteArrayAsync(),
+                    response.Content.Headers.ContentType?.ToString()
+                );
             }
-            catch (Exception exception)
+            catch (Exception exception) when (
+                exception is HttpRequestException || exception is TaskCanceledException
+            )
             {
                 this.RecordFailure(address, exception.Message);
                 return null;
             }
+        }
 
-            int statusCode = (int)this.web.StatusCode;
+        /// <summary>
+        /// Adds a fetched file to the snapshot and queues whatever it
+        /// refers to. How the file is read depends on its Content-Type:
+        /// <list type="bullet">
+        /// <item><description>HTML beneath the site root is crawled for
+        /// links and the files it uses.</description></item>
+        /// <item><description>CSS is read for url(…) and
+        /// @import.</description></item>
+        /// <item><description>A web app manifest is read for its
+        /// icons.</description></item>
+        /// <item><description>Anything else is stored as it
+        /// is.</description></item>
+        /// </list>
+        /// If the request redirected, as GitHub Pages does from /post to
+        /// /post/, the file is stored and read under the address it
+        /// redirected to, so it isn't archived twice and its relative links
+        /// resolve correctly.
+        /// </summary>
+        /// <param name="reference">What was requested.</param>
+        /// <param name="response">The response.</param>
+        /// <returns>The captured file, or null if it was skipped.</returns>
+        private CapturedFile Capture(Reference reference, FetchedResponse response)
+        {
+            Uri address = response.Address;
 
-            if (statusCode < 200 || statusCode > 299)
+            if (address.AbsoluteUri != reference.Address.AbsoluteUri)
             {
-                this.RecordFailure(address, $"HTTP status {statusCode}");
+                if (reference.Kind == ReferenceKind.Page ? !this.IsUnderRoot(address) : !this.IsOnHost(address))
+                {
+                    Console.WriteLine($"Skipping {reference.Address}, which redirects off-site to {address}");
+                    return null;
+                }
+
+                this.redirects.Add(new SnapshotRedirect(reference.Address.AbsoluteUri, address.AbsoluteUri));
+
+                if (!this.fetched.Add(address.AbsoluteUri))
+                {
+                    Console.WriteLine($"Already fetched {address} (redirected from {reference.Address})");
+                    return null;
+                }
+            }
+
+            string contentType = response.ContentType ?? "application/octet-stream";
+            string mediaType = Snapshot.MediaType(contentType);
+            bool isHtml = Snapshot.IsHtml(contentType);
+            bool isCss = mediaType == "text/css" || (reference.Kind == ReferenceKind.Stylesheet && !isHtml);
+            bool isWebManifest =
+                mediaType == "application/manifest+json" ||
+                (reference.Kind == ReferenceKind.WebManifest && !isHtml);
+
+            string path = SnapshotPaths.FromAddress(address, isHtml);
+
+            if (this.filesByPath.TryGetValue(path, out CapturedFile existing))
+            {
+                Console.WriteLine($"Skipping {address}, because {existing.Address} is already stored as {path}");
                 return null;
             }
 
-            if (this.web.ResponseUri != null)
-                finalAddress = new Uri(this.web.ResponseUri.GetLeftPart(UriPartial.Path));
+            CapturedFile file = new(address, path, response.Content, contentType, isHtml, isHtml || isCss || isWebManifest);
+            this.files.Add(file);
+            this.filesByPath.Add(path, file);
 
-            return htmlDoc;
+            List<Reference> references;
+
+            if (isHtml && this.IsUnderRoot(address))
+            {
+                HtmlDocument html = new();
+                html.LoadHtml(Decode(response.Content, contentType));
+                references = References.FromHtml(html, address);
+            }
+            else if (isCss)
+            {
+                references = References.FromCss(Decode(response.Content, contentType), address);
+            }
+            else if (isWebManifest)
+            {
+                references = References.FromWebManifest(Decode(response.Content, contentType), address);
+            }
+            else
+            {
+                references = new();
+            }
+
+            foreach (Reference found in references)
+                this.Follow(found);
+
+            return file;
+        }
+
+        /// <summary>
+        /// Queues a reference to be fetched, if it's on the site and hasn't
+        /// been queued before. Links to pages must be beneath the site
+        /// root. Files a page uses only need to be on the same host, so a
+        /// site at example.com/blog/ can use /css/site.css.
+        /// </summary>
+        /// <param name="reference">A reference found in a captured
+        /// file.</param>
+        private void Follow(Reference reference)
+        {
+            bool onSite = reference.Kind == ReferenceKind.Page
+                ? this.IsUnderRoot(reference.Address)
+                : this.IsOnHost(reference.Address);
+
+            if (!onSite)
+            {
+                if (reference.Kind != ReferenceKind.Page)
+                    Console.WriteLine($"Skipping off-site file {reference.Address}");
+
+                return;
+            }
+
+            if (this.queued.Add(reference.Address.AbsoluteUri))
+                this.queue.Enqueue(reference);
+        }
+
+        /// <summary>
+        /// Determines whether an address is on the same scheme, host and
+        /// port as the site root.
+        /// </summary>
+        /// <param name="address">An absolute address.</param>
+        /// <returns>True if the address is on the site's host.</returns>
+        private bool IsOnHost(Uri address)
+        {
+            return address.Scheme == this.rootUri.Scheme &&
+                String.Equals(address.Authority, this.rootUri.Authority, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Determines whether an address is on the site's host and beneath
+        /// the site root's path.
+        /// </summary>
+        /// <param name="address">An absolute address.</param>
+        /// <returns>True if the address is beneath the site root.</returns>
+        private bool IsUnderRoot(Uri address)
+        {
+            return this.IsOnHost(address) &&
+                address.AbsolutePath.StartsWith(this.rootUri.AbsolutePath, StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -353,46 +359,55 @@ namespace WebsiteArchiver
         /// <param name="address">The address that couldn't be
         /// fetched.</param>
         /// <param name="reason">Why it couldn't be fetched.</param>
-        private void RecordFailure(Uri address, String reason)
+        private void RecordFailure(Uri address, string reason)
         {
             Console.Error.WriteLine($"Failed to fetch {address}: {reason}");
             this.failedAddresses.Add(address.AbsoluteUri);
         }
 
         /// <summary>
-        /// Gets the path of an on-site address relative to DOMAIN, e.g.
-        /// https://example.com/blog/post/ becomes blog/post/.
+        /// Decodes a text response, using the charset from its Content-Type
+        /// or a byte order mark, and UTF-8 otherwise. Only used to find
+        /// references; the file is stored as its original bytes.
         /// </summary>
-        /// <param name="link">An absolute address on the site.</param>
-        /// <returns>The address relative to DOMAIN.</returns>
-        private String GetPathRelativeToRoot(Uri link)
+        /// <param name="content">The response body.</param>
+        /// <param name="contentType">The response's Content-Type.</param>
+        /// <returns>The decoded text.</returns>
+        private static string Decode(byte[] content, string contentType)
         {
-            return link.AbsolutePath.Substring(this.rootUri.AbsolutePath.Length);
+            Encoding encoding = Encoding.UTF8;
+            string charset = contentType
+                .Split(';')
+                .Skip(1)
+                .Select(parameter => parameter.Split('=', 2))
+                .Where(pair => pair.Length == 2 && pair[0].Trim().Equals("charset", StringComparison.OrdinalIgnoreCase))
+                .Select(pair => pair[1].Trim().Trim('"'))
+                .FirstOrDefault();
+
+            if (charset != null)
+            {
+                try
+                {
+                    encoding = Encoding.GetEncoding(charset);
+                }
+                catch (ArgumentException)
+                {
+                    // An unknown charset: UTF-8 is the best guess
+                }
+            }
+
+            using StreamReader reader = new(new MemoryStream(content), encoding, detectEncodingFromByteOrderMarks: true);
+            return reader.ReadToEnd();
         }
 
         /// <summary>
-        /// Orchestrates storage of a document in Azure Blob Storage.
+        /// A successful response.
         /// </summary>
-        /// <param name="htmlDoc">An HTML document.</param>
-        /// <param name="relativePath">The address of the HTML document
-        /// relative to DOMAIN, e.g. blog/post/.</param>
-        /// <returns>An awaitable Task.</returns>
-        private async Task StoreDocument(HtmlDocument htmlDoc, String relativePath)
-        {
-            string fileName = relativePath.TrimEnd('/');
-
-            string lastSegment = fileName.Substring(fileName.LastIndexOf('/') + 1);
-
-            // Pages are stored as .html, unless their address already ends
-            // in .html or .htm, e.g. page.html. Other periods in the name,
-            // as in python-3.7-data-classes, aren't treated as extensions.
-            bool hasHtmlExtension =
-                lastSegment.EndsWith(".html", StringComparison.OrdinalIgnoreCase) ||
-                lastSegment.EndsWith(".htm", StringComparison.OrdinalIgnoreCase);
-
-            string fileExtension = hasHtmlExtension ? "" : "html";
-
-            await this.blobStorageClient.UploadBlob(fileName, fileExtension, htmlDoc.Text);
-        }
+        /// <param name="Address">The address the response came from, after
+        /// any redirects, without a query string or fragment.</param>
+        /// <param name="Content">The response body.</param>
+        /// <param name="ContentType">The response's Content-Type, or null if
+        /// it didn't have one.</param>
+        private record FetchedResponse(Uri Address, byte[] Content, string ContentType);
     }
 }
