@@ -6,9 +6,10 @@ namespace WebsiteArchiver
     class Program
     {
         /// <summary>
-        /// Archives the site, exiting with a non-zero code if any page or
-        /// stylesheet couldn't be fetched, so a partial archive isn't
-        /// mistaken for a complete one.
+        /// Archives the site, exiting with a non-zero code if any file
+        /// couldn't be fetched, so a partial archive isn't mistaken for a
+        /// complete one. A partial snapshot is still published, marked
+        /// incomplete.
         /// </summary>
         /// <returns>0 if everything was archived, otherwise 1.</returns>
         static async Task<int> Main(string[] args)
@@ -41,7 +42,8 @@ namespace WebsiteArchiver
                 return 0;
 
             Console.Error.WriteLine(
-                $"Finished with {archiver.FailedAddresses.Count} address(es) that couldn't be fetched:"
+                $"Snapshot {archiver.SnapshotId} was published, marked incomplete, because " +
+                $"{archiver.FailedAddresses.Count} address(es) couldn't be fetched:"
             );
 
             foreach (String address in archiver.FailedAddresses)

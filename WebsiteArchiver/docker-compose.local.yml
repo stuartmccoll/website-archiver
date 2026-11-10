@@ -64,4 +64,4 @@ services:
       - azurite
     environment:
       AZURE_STORAGE_CONNECTION_STRING: *azurite-connection-string
-    command: az storage blob list --container-name archive --query "[].{name:name, size:properties.contentLength}" --output table --only-show-errors
+    command: az storage blob list --container-name archive --query "[].{name:name, size:properties.contentLength, contentType:properties.contentSettings.contentType}" --output table --only-show-errors

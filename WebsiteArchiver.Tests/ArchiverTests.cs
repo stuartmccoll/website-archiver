@@ -1,4 +1,5 @@
 ﻿using WebsiteArchiver.Tests.Fakes;
+using static WebsiteArchiver.Tests.TestSites;
 
 // The archiver is configured through process-wide environment variables, so
 // tests must not run in parallel.
@@ -7,7 +8,7 @@
 namespace WebsiteArchiver.Tests
 {
     /// <summary>
-    /// End-to-end tests that pin the archiver's current behaviour, so that
+    /// End-to-end tests that pin the archiver's crawling behaviour, so that
     /// dependency or framework upgrades can be checked for regressions.
     ///
     /// Some of the behaviour pinned here is a quirk rather than a deliberate
@@ -15,126 +16,67 @@ namespace WebsiteArchiver.Tests
     /// </summary>
     public class ArchiverTests
     {
-        private const string D = FakeWebsite.DomainPlaceholder;
-        private const string Css = "body { color: #333; }";
-
-        /// <summary>
-        /// Builds an HTML page that links the site stylesheet and contains
-        /// the given anchors.
-        /// </summary>
-        private static string Page(string title, params string[] hrefs)
-        {
-            string anchors = string.Join(
-                "\n    ",
-                hrefs.Select(href => $"<a href=\"{href}\">{href}</a>")
-            );
-
-            return $"""
-                <!DOCTYPE html>
-                <html>
-                  <head>
-                    <title>{title}</title>
-                    <link rel="stylesheet" href="css/site.css">
-                  </head>
-                  <body>
-                    {anchors}
-                  </body>
-                </html>
-                """;
-        }
-
-        /// <summary>
-        /// Starts a fake website serving /css/site.css plus whatever
-        /// <paramref name="configure"/> adds, and archives it.
-        /// </summary>
-        /// <param name="configure">Adds pages to the site.</param>
-        /// <param name="domain">Optional override for DOMAIN, given the
-        /// site's root URL (with trailing slash).</param>
-        private static async Task<(FakeWebsite Site, ArchiveRun Run)> ArchiveAsync(
-            Action<FakeWebsite> configure,
-            Func<string, string>? domain = null
-        )
-        {
-            FakeWebsite site = await FakeWebsite.StartAsync();
-            site.WithStylesheet("/css/site.css", Css);
-            configure(site);
-
-            ArchiveRun run = await ArchiveRun.ExecuteAsync(site, domain?.Invoke(site.Domain));
-            return (site, run);
-        }
+        private static string SitePath(ArchiveRun run, string path) =>
+            $"snapshots/{run.SnapshotId}/site/{path}";
 
         [Fact]
-        public async Task Homepage_IsStoredAsMainHtml()
+        public async Task Homepage_IsStoredAsIndexHtml()
         {
             var (site, run) = await ArchiveAsync(s =>
-                s.WithPage("/", Page("Home", "https://external.example/"))
+                s.WithPage("/", Page("Home", External))
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/"), run.Blobs["main.html"]);
+            Assert.Equal(site.Rendered("/"), run.Text("index.html"));
         }
 
         [Fact]
-        public async Task BlobNames_ArePrefixedWithTodaysDate()
+        public async Task Snapshot_IsNamedAfterTheUtcTimeItStarted()
         {
             var (site, run) = await ArchiveAsync(s =>
-                s.WithPage("/", Page("Home", "https://external.example/"))
+                s.WithPage("/", Page("Home", External))
             );
             await using var _ = site;
 
-            Assert.Matches("^[0-3][0-9][01][0-9][0-9]{4}$", run.DatePrefix);
-            Assert.NotEmpty(run.Uploads);
+            // ArchiveRun also checks the time is within the run
+            Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$", run.SnapshotId);
         }
 
         [Fact]
-        public async Task Stylesheet_IsStoredUnderItsFileNameWithoutItsDirectory()
+        public async Task Stylesheet_IsStoredAtItsPath()
         {
             var (site, run) = await ArchiveAsync(s =>
-                s.WithPage("/", Page("Home", "https://external.example/"))
+                s.WithPage("/", Page("Home", External))
             );
             await using var _ = site;
 
-            Assert.Equal(Css, run.Blobs["site.css"]);
-            Assert.DoesNotContain("css/site.css", run.Blobs.Keys);
+            Assert.Equal(Css, run.Text("css/site.css"));
         }
 
         [Fact]
-        public async Task TopLevelPage_IsStoredAsPageNameDotHtml()
+        public async Task TopLevelPage_IsStoredAsIndexHtmlInItsFolder()
         {
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", $"{D}about/"))
-                .WithPage("/about/", Page("About", "https://external.example/"))
+                .WithPage("/about/", Page("About", External))
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/about/"), run.Blobs["about.html"]);
+            Assert.Equal(site.Rendered("/about/"), run.Text("about/index.html"));
         }
 
-        [Fact]
-        public async Task NestedPage_IsStoredInAFolderNamedAfterItsFirstPathSegment()
+        [Theory]
+        [InlineData("/blog/first-post/")]
+        [InlineData("/blog/2024/deep-post/")]
+        public async Task NestedPage_KeepsItsFolders(string path)
         {
             var (site, run) = await ArchiveAsync(s => s
-                .WithPage("/", Page("Home", $"{D}blog/first-post/"))
-                .WithPage("/blog/first-post/", Page("First post", "https://external.example/"))
+                .WithPage("/", Page("Home", $"{D}{path.TrimStart('/')}"))
+                .WithPage(path, Page("Post", External))
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/blog/first-post/"), run.Blobs["blog/first-post.html"]);
-        }
-
-        [Fact]
-        public async Task DeeplyNestedPage_JoinsRemainingPathSegmentsWithHyphens()
-        {
-            var (site, run) = await ArchiveAsync(s => s
-                .WithPage("/", Page("Home", $"{D}blog/2024/deep-post/"))
-                .WithPage("/blog/2024/deep-post/", Page("Deep post", "https://external.example/"))
-            );
-            await using var _ = site;
-
-            Assert.Equal(
-                site.Rendered("/blog/2024/deep-post/"),
-                run.Blobs["blog/2024-deep-post.html"]
-            );
+            Assert.Equal(site.Rendered(path), run.Text($"{path.TrimStart('/')}index.html"));
         }
 
         [Fact]
@@ -144,28 +86,23 @@ namespace WebsiteArchiver.Tests
                 .WithPage("/", Page("Home", $"{D}one/"))
                 .WithPage("/one/", Page("One", $"{D}two/"))
                 .WithPage("/two/", Page("Two", $"{D}three/"))
-                .WithPage("/three/", Page("Three", "https://external.example/"))
+                .WithPage("/three/", Page("Three", External))
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/three/"), run.Blobs["three.html"]);
+            Assert.Equal(site.Rendered("/three/"), run.Text("three/index.html"));
         }
 
         [Fact]
-        public async Task OffSiteAndXmlLinks_AreNotFetched()
+        public async Task OffSiteLinks_AreNotFetched()
         {
             var (site, run) = await ArchiveAsync(s => s
-                .WithPage("/", Page(
-                    "Home",
-                    "https://external.example/",
-                    $"{D}index.xml",
-                    $"{D}blog/index.xml"
-                ))
+                .WithPage("/", Page("Home", External, "https://github.com/example"))
             );
             await using var _ = site;
 
             Assert.Equal(new[] { "/", "/css/site.css" }, run.RequestedPaths.Order());
-            Assert.Equal(new[] { "main.html", "site.css" }, run.Blobs.Keys.Order());
+            Assert.Equal(new[] { "css/site.css", "index.html" }, run.Paths);
         }
 
         [Fact]
@@ -174,12 +111,24 @@ namespace WebsiteArchiver.Tests
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", $"{D}about/", $"{D}blog/", $"{D}about/"))
                 .WithPage("/blog/", Page("Blog", $"{D}about/"))
-                .WithPage("/about/", Page("About", "https://external.example/"))
+                .WithPage("/about/", Page("About", External))
             );
             await using var _ = site;
 
             Assert.Single(run.RequestedPaths, path => path == "/about/");
-            Assert.Single(run.Uploads, upload => upload.Name == "about.html");
+            Assert.Single(run.Uploads, name => name == SitePath(run, "about/index.html"));
+        }
+
+        [Fact]
+        public async Task StylesheetUsedByEveryPage_IsFetchedOnce()
+        {
+            var (site, run) = await ArchiveAsync(s => s
+                .WithPage("/", Page("Home", $"{D}about/"))
+                .WithPage("/about/", Page("About", External))
+            );
+            await using var _ = site;
+
+            Assert.Single(run.RequestedPaths, path => path == "/css/site.css");
         }
 
         [Fact]
@@ -191,8 +140,8 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/"), run.Blobs["main.html"]);
-            Assert.Equal(new[] { "about.html", "main.html", "site.css" }, run.Blobs.Keys.Order(StringComparer.Ordinal));
+            Assert.Equal(site.Rendered("/"), run.Text("index.html"));
+            Assert.Equal(new[] { "about/index.html", "css/site.css", "index.html" }, run.Paths);
             Assert.Single(run.RequestedPaths, path => path == "/");
         }
 
@@ -201,27 +150,27 @@ namespace WebsiteArchiver.Tests
         {
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", $"{D}page.html", $"{D}docs/guide.htm"))
-                .WithPage("/page.html", Page("Page", "https://external.example/"))
-                .WithPage("/docs/guide.htm", Page("Guide", "https://external.example/"))
+                .WithPage("/page.html", Page("Page", External))
+                .WithPage("/docs/guide.htm", Page("Guide", External))
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/page.html"), run.Blobs["page.html"]);
-            Assert.Equal(site.Rendered("/docs/guide.htm"), run.Blobs["docs/guide.htm"]);
+            Assert.Equal(site.Rendered("/page.html"), run.Text("page.html"));
+            Assert.Equal(site.Rendered("/docs/guide.htm"), run.Text("docs/guide.htm"));
         }
 
         [Fact]
-        public async Task PageNameContainingAPeriod_IsStoredAsHtml()
+        public async Task PageNameContainingAPeriod_IsStoredAsIndexHtml()
         {
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", $"{D}posts/python-3.7-data-classes/"))
-                .WithPage("/posts/python-3.7-data-classes/", Page("Post", "https://external.example/"))
+                .WithPage("/posts/python-3.7-data-classes/", Page("Post", External))
             );
             await using var _ = site;
 
             Assert.Equal(
                 site.Rendered("/posts/python-3.7-data-classes/"),
-                run.Blobs["posts/python-3.7-data-classes.html"]
+                run.Text("posts/python-3.7-data-classes/index.html")
             );
         }
 
@@ -232,13 +181,13 @@ namespace WebsiteArchiver.Tests
                 .WithPage("/", Page("Home", $"{D}posts/second"))
                 .WithRedirect("/posts/second", "/posts/second/")
                 .WithPage("/posts/second/", Page("Second", "../first/"))
-                .WithPage("/posts/first/", Page("First", "https://external.example/"))
+                .WithPage("/posts/first/", Page("First", External))
             );
             await using var _ = site;
 
             Assert.Empty(run.FailedAddresses);
-            Assert.Equal(site.Rendered("/posts/second/"), run.Blobs["posts/second.html"]);
-            Assert.Equal(site.Rendered("/posts/first/"), run.Blobs["posts/first.html"]);
+            Assert.Equal(site.Rendered("/posts/second/"), run.Text("posts/second/index.html"));
+            Assert.Equal(site.Rendered("/posts/first/"), run.Text("posts/first/index.html"));
         }
 
         [Theory]
@@ -253,28 +202,28 @@ namespace WebsiteArchiver.Tests
                 .WithPage("/", Page("Home", $"{D}{firstLink}", $"{D}{secondLink}"))
                 .WithRedirect("/posts/second", "/posts/second/")
                 .WithPage("/posts/second/", Page("Second", $"{D}about/"))
-                .WithPage("/about/", Page("About", "https://external.example/"))
+                .WithPage("/about/", Page("About", External))
             );
             await using var _ = site;
 
-            Assert.Single(run.Uploads, upload => upload.Name == "posts/second.html");
+            Assert.Single(run.Uploads, name => name == SitePath(run, "posts/second/index.html"));
             Assert.Single(run.RequestedPaths, path => path == "/about/");
         }
 
         [Fact]
-        public async Task PageInADirectoryContainingAPeriod_IsStoredAsHtml()
+        public async Task PageInADirectoryContainingAPeriod_IsStoredAsIndexHtml()
         {
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", $"{D}v1.2/notes/"))
-                .WithPage("/v1.2/notes/", Page("Notes", "https://external.example/"))
+                .WithPage("/v1.2/notes/", Page("Notes", External))
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/v1.2/notes/"), run.Blobs["v1.2/notes.html"]);
+            Assert.Equal(site.Rendered("/v1.2/notes/"), run.Text("v1.2/notes/index.html"));
         }
 
         [Fact]
-        public async Task TypicalSite_ProducesExpectedSetOfBlobs()
+        public async Task TypicalSite_ProducesExpectedSetOfFiles()
         {
             string[] nav = { D, $"{D}about/", $"{D}blog/", "https://github.com/example" };
 
@@ -284,33 +233,36 @@ namespace WebsiteArchiver.Tests
                 .WithPage("/blog/", Page("Blog", nav.Append($"{D}blog/first-post/").Append($"{D}blog/2024/second-post/").ToArray()))
                 .WithPage("/blog/first-post/", Page("First post", nav))
                 .WithPage("/blog/2024/second-post/", Page("Second post", nav))
+                .WithText("/index.xml", "<rss version=\"2.0\"></rss>", "application/rss+xml")
             );
             await using var _ = site;
 
             Assert.Equal(
                 new[]
                 {
-                    "about.html",
-                    "blog.html",
-                    "blog/2024-second-post.html",
-                    "blog/first-post.html",
-                    "main.html",
-                    "site.css",
+                    "about/index.html",
+                    "blog/2024/second-post/index.html",
+                    "blog/first-post/index.html",
+                    "blog/index.html",
+                    "css/site.css",
+                    "index.html",
+                    "index.xml",
                 },
-                run.Blobs.Keys.Order(StringComparer.Ordinal)
+                run.Paths
             );
+            Assert.Empty(run.FailedAddresses);
         }
 
         [Fact]
         public async Task HomepageWithoutStylesheet_IsArchived()
         {
             var (site, run) = await ArchiveAsync(s => s
-                .WithPage("/", "<html><body><a href=\"https://external.example/\">External</a></body></html>")
+                .WithPage("/", $"<html><body><a href=\"{External}\">External</a></body></html>")
             );
             await using var _ = site;
 
-            Assert.Equal(new[] { "main.html" }, run.Blobs.Keys);
-            Assert.Equal(site.Rendered("/"), run.Blobs["main.html"]);
+            Assert.Equal(new[] { "index.html" }, run.Paths);
+            Assert.Equal(site.Rendered("/"), run.Text("index.html"));
         }
 
         [Fact]
@@ -322,7 +274,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/about/"), run.Blobs["about.html"]);
+            Assert.Equal(site.Rendered("/about/"), run.Text("about/index.html"));
         }
 
         [Fact]
@@ -333,7 +285,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(Css, run.Blobs["site.css"]);
+            Assert.Equal(Css, run.Text("css/site.css"));
         }
 
         [Fact]
@@ -341,11 +293,11 @@ namespace WebsiteArchiver.Tests
         {
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", "/contact/"))
-                .WithPage("/contact/", Page("Contact", "https://external.example/"))
+                .WithPage("/contact/", Page("Contact", External))
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/contact/"), run.Blobs["contact.html"]);
+            Assert.Equal(site.Rendered("/contact/"), run.Text("contact/index.html"));
         }
 
         [Fact]
@@ -354,15 +306,12 @@ namespace WebsiteArchiver.Tests
             var (site, run) = await ArchiveAsync(
                 s => s
                     .WithPage("/", Page("Home", $"{D}about/"))
-                    .WithPage("/about/", Page("About", "https://external.example/")),
+                    .WithPage("/about/", Page("About", External)),
                 domain: root => root.TrimEnd('/')
             );
             await using var _ = site;
 
-            Assert.Equal(
-                new[] { "about.html", "main.html", "site.css" },
-                run.Blobs.Keys.Order(StringComparer.Ordinal)
-            );
+            Assert.Equal(new[] { "about/index.html", "css/site.css", "index.html" }, run.Paths);
         }
 
         [Fact]
@@ -375,13 +324,14 @@ namespace WebsiteArchiver.Tests
                         <link rel="stylesheet" href="https://cdn.invalid/framework.css">
                         <link rel="stylesheet" href="css/site.css">
                       </head>
-                      <body><a href="https://external.example/">External</a></body>
+                      <body><a href="{External}">External</a></body>
                     </html>
                     """)
             );
             await using var _ = site;
 
-            Assert.Equal(new[] { "main.html", "site.css" }, run.Blobs.Keys.Order());
+            Assert.Equal(new[] { "css/site.css", "index.html" }, run.Paths);
+            Assert.Empty(run.FailedAddresses);
         }
 
         [Fact]
@@ -399,7 +349,7 @@ namespace WebsiteArchiver.Tests
             await using var _ = site;
 
             Assert.Equal(new[] { "/", "/css/site.css" }, run.RequestedPaths.Order());
-            Assert.Equal(new[] { "main.html", "site.css" }, run.Blobs.Keys.Order());
+            Assert.Equal(new[] { "css/site.css", "index.html" }, run.Paths);
         }
 
         [Fact]
@@ -407,12 +357,12 @@ namespace WebsiteArchiver.Tests
         {
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", $"{D}about/", $"{D}about/#team"))
-                .WithPage("/about/", Page("About", "https://external.example/"))
+                .WithPage("/about/", Page("About", External))
             );
             await using var _ = site;
 
             Assert.Single(run.RequestedPaths, path => path == "/about/");
-            Assert.Equal(site.Rendered("/about/"), run.Blobs["about.html"]);
+            Assert.Equal(site.Rendered("/about/"), run.Text("about/index.html"));
         }
 
         [Fact]
@@ -421,13 +371,13 @@ namespace WebsiteArchiver.Tests
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", "blog/"))
                 .WithPage("/blog/", Page("Blog", "first-post/", "../about/"))
-                .WithPage("/blog/first-post/", Page("First post", "https://external.example/"))
-                .WithPage("/about/", Page("About", "https://external.example/"))
+                .WithPage("/blog/first-post/", Page("First post", External))
+                .WithPage("/about/", Page("About", External))
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/blog/first-post/"), run.Blobs["blog/first-post.html"]);
-            Assert.Equal(site.Rendered("/about/"), run.Blobs["about.html"]);
+            Assert.Equal(site.Rendered("/blog/first-post/"), run.Text("blog/first-post/index.html"));
+            Assert.Equal(site.Rendered("/about/"), run.Text("about/index.html"));
         }
 
         [Fact]
@@ -440,27 +390,27 @@ namespace WebsiteArchiver.Tests
                     $"{D}about/?utm_source=footer&amp;utm_medium=web",
                     $"{D}about/"
                 ))
-                .WithPage("/about/", Page("About", "https://external.example/"))
+                .WithPage("/about/", Page("About", External))
             );
             await using var _ = site;
 
             Assert.Equal(new[] { "/about/" }, run.RequestedPaths.Where(path => path.StartsWith("/about/")));
-            Assert.Equal(new[] { "about.html", "main.html", "site.css" }, run.Blobs.Keys.Order(StringComparer.Ordinal));
+            Assert.Equal(new[] { "about/index.html", "css/site.css", "index.html" }, run.Paths);
         }
 
-        // Error handling: a page or stylesheet that can't be fetched is
-        // reported and skipped, without stopping the rest of the run.
+        // Error handling: a file that can't be fetched is reported and
+        // skipped, without stopping the rest of the run.
 
         [Fact]
         public async Task MissingPage_IsReportedAndNotArchived()
         {
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", $"{D}missing/", $"{D}about/"))
-                .WithPage("/about/", Page("About", "https://external.example/"))
+                .WithPage("/about/", Page("About", External))
             );
             await using var _ = site;
 
-            Assert.Equal(new[] { "about.html", "main.html", "site.css" }, run.Blobs.Keys.Order(StringComparer.Ordinal));
+            Assert.Equal(new[] { "about/index.html", "css/site.css", "index.html" }, run.Paths);
             Assert.Equal(new[] { $"{site.Domain}missing/" }, run.FailedAddresses);
         }
 
@@ -470,12 +420,12 @@ namespace WebsiteArchiver.Tests
             var (site, run) = await ArchiveAsync(s => s
                 .WithPage("/", Page("Home", $"{D}broken/"))
                 .WithPage("/broken/", Page("Broken", $"{D}about/"), statusCode: 500)
-                .WithPage("/about/", Page("About", "https://external.example/"))
+                .WithPage("/about/", Page("About", External))
             );
             await using var _ = site;
 
             Assert.DoesNotContain("/about/", run.RequestedPaths);
-            Assert.Equal(new[] { "main.html", "site.css" }, run.Blobs.Keys.Order(StringComparer.Ordinal));
+            Assert.Equal(new[] { "css/site.css", "index.html" }, run.Paths);
             Assert.Equal(new[] { $"{site.Domain}broken/" }, run.FailedAddresses);
         }
 
@@ -492,11 +442,11 @@ namespace WebsiteArchiver.Tests
                       <body><a href="{D}about/">About</a></body>
                     </html>
                     """)
-                .WithPage("/about/", Page("About", "https://external.example/"))
+                .WithPage("/about/", Page("About", External))
             );
             await using var _ = site;
 
-            Assert.Equal(new[] { "about.html", "main.html", "site.css" }, run.Blobs.Keys.Order(StringComparer.Ordinal));
+            Assert.Equal(new[] { "about/index.html", "css/site.css", "index.html" }, run.Paths);
             Assert.Equal(new[] { $"{site.Domain}css/missing.css" }, run.FailedAddresses);
         }
 
@@ -504,7 +454,7 @@ namespace WebsiteArchiver.Tests
         public async Task SuccessfulRun_ReportsNoFailures()
         {
             var (site, run) = await ArchiveAsync(s => s
-                .WithPage("/", Page("Home", "https://external.example/"))
+                .WithPage("/", Page("Home", External))
             );
             await using var _ = site;
 
@@ -536,12 +486,16 @@ namespace WebsiteArchiver.Tests
         }
 
         [Fact]
-        public async Task UnavailableHomepage_FailsTheRun()
+        public async Task UnavailableHomepage_FailsTheRunWithoutPublishingAnything()
         {
             await using FakeWebsite site = await FakeWebsite.StartAsync();
-            site.WithPage("/", Page("Home", "https://external.example/"), statusCode: 503);
+            await using FakeBlobStorage storage = await FakeBlobStorage.StartAsync();
+            site.WithPage("/", Page("Home", External), statusCode: 503);
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() => ArchiveRun.ExecuteAsync(site));
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => ArchiveRun.ExecuteAsync(site, storage: storage)
+            );
+            Assert.Empty(storage.Uploads);
         }
     }
 }
