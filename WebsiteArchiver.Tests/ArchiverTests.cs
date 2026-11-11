@@ -27,7 +27,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/"), run.Text("index.html"));
+            Assert.Equal(site.Rendered("/"), run.OriginalText("index.html"));
         }
 
         [Fact]
@@ -62,7 +62,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/about/"), run.Text("about/index.html"));
+            Assert.Equal(site.Rendered("/about/"), run.OriginalText("about/index.html"));
         }
 
         [Theory]
@@ -76,7 +76,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered(path), run.Text($"{path.TrimStart('/')}index.html"));
+            Assert.Equal(site.Rendered(path), run.OriginalText($"{path.TrimStart('/')}index.html"));
         }
 
         [Fact]
@@ -90,7 +90,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/three/"), run.Text("three/index.html"));
+            Assert.Equal(site.Rendered("/three/"), run.OriginalText("three/index.html"));
         }
 
         [Fact]
@@ -140,7 +140,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/"), run.Text("index.html"));
+            Assert.Equal(site.Rendered("/"), run.OriginalText("index.html"));
             Assert.Equal(new[] { "about/index.html", "css/site.css", "index.html" }, run.Paths);
             Assert.Single(run.RequestedPaths, path => path == "/");
         }
@@ -155,8 +155,8 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/page.html"), run.Text("page.html"));
-            Assert.Equal(site.Rendered("/docs/guide.htm"), run.Text("docs/guide.htm"));
+            Assert.Equal(site.Rendered("/page.html"), run.OriginalText("page.html"));
+            Assert.Equal(site.Rendered("/docs/guide.htm"), run.OriginalText("docs/guide.htm"));
         }
 
         [Fact]
@@ -170,7 +170,7 @@ namespace WebsiteArchiver.Tests
 
             Assert.Equal(
                 site.Rendered("/posts/python-3.7-data-classes/"),
-                run.Text("posts/python-3.7-data-classes/index.html")
+                run.OriginalText("posts/python-3.7-data-classes/index.html")
             );
         }
 
@@ -186,8 +186,8 @@ namespace WebsiteArchiver.Tests
             await using var _ = site;
 
             Assert.Empty(run.FailedAddresses);
-            Assert.Equal(site.Rendered("/posts/second/"), run.Text("posts/second/index.html"));
-            Assert.Equal(site.Rendered("/posts/first/"), run.Text("posts/first/index.html"));
+            Assert.Equal(site.Rendered("/posts/second/"), run.OriginalText("posts/second/index.html"));
+            Assert.Equal(site.Rendered("/posts/first/"), run.OriginalText("posts/first/index.html"));
         }
 
         [Theory]
@@ -219,7 +219,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/v1.2/notes/"), run.Text("v1.2/notes/index.html"));
+            Assert.Equal(site.Rendered("/v1.2/notes/"), run.OriginalText("v1.2/notes/index.html"));
         }
 
         [Fact]
@@ -262,7 +262,7 @@ namespace WebsiteArchiver.Tests
             await using var _ = site;
 
             Assert.Equal(new[] { "index.html" }, run.Paths);
-            Assert.Equal(site.Rendered("/"), run.Text("index.html"));
+            Assert.Equal(site.Rendered("/"), run.OriginalText("index.html"));
         }
 
         [Fact]
@@ -274,7 +274,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/about/"), run.Text("about/index.html"));
+            Assert.Equal(site.Rendered("/about/"), run.OriginalText("about/index.html"));
         }
 
         [Fact]
@@ -297,7 +297,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/contact/"), run.Text("contact/index.html"));
+            Assert.Equal(site.Rendered("/contact/"), run.OriginalText("contact/index.html"));
         }
 
         [Fact]
@@ -362,7 +362,7 @@ namespace WebsiteArchiver.Tests
             await using var _ = site;
 
             Assert.Single(run.RequestedPaths, path => path == "/about/");
-            Assert.Equal(site.Rendered("/about/"), run.Text("about/index.html"));
+            Assert.Equal(site.Rendered("/about/"), run.OriginalText("about/index.html"));
         }
 
         [Fact]
@@ -376,8 +376,8 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/blog/first-post/"), run.Text("blog/first-post/index.html"));
-            Assert.Equal(site.Rendered("/about/"), run.Text("about/index.html"));
+            Assert.Equal(site.Rendered("/blog/first-post/"), run.OriginalText("blog/first-post/index.html"));
+            Assert.Equal(site.Rendered("/about/"), run.OriginalText("about/index.html"));
         }
 
         [Fact]

@@ -92,6 +92,12 @@ namespace WebsiteArchiver.Tests
         public string Text(string path) => this.Files[path].Text;
 
         /// <summary>
+        /// An original/ file's contents, decoded as UTF-8. This is the file
+        /// exactly as it was served, before its links were rewritten.
+        /// </summary>
+        public string OriginalText(string path) => this.Originals[path].Text;
+
+        /// <summary>
         /// This run's entry in snapshots/index.json.
         /// </summary>
         public JsonElement IndexEntry =>

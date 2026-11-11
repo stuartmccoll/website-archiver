@@ -22,13 +22,15 @@ snapshots/2026-11-10T09-15-00Z/          one folder per run, named after its sta
   site/index.html                        the homepage
   site/posts/my-post/index.html          https://example.com/posts/my-post/
   site/css/site.css                      https://example.com/css/site.css
-  original/…                             unmodified copies of the HTML, CSS and web manifests
+  original/…                             the HTML, CSS and web manifests exactly as they were served
 ```
 
 - Paths mirror the site's URLs, so a page at `/posts/my-post/` is stored as `posts/my-post/index.html`.
 - `manifest.json` records when the run started and finished, whether it was complete, any addresses that failed, the redirects it followed, and each file's URL, path, `Content-Type`, size and SHA-256 hash.
 - `index.json` is updated last, so a snapshot only appears in it once all its files are uploaded. Two runs at the same time can't overwrite each other's entries.
-- Links inside the pages still point at the live site. Rewriting them so a snapshot can be browsed on its own is the next planned change. `original/` keeps the pages exactly as they were fetched, so the rewritten copies can be rebuilt.
+- `site/` can be browsed on its own, from wherever it's served. Every link to a file in the snapshot is rewritten as a path relative to the page or stylesheet it's in, e.g. `../../css/site.css` or `about/index.html#team`. That covers `href` and `src`, `srcset`, `poster`, `<base href>`, `url(…)` and `@import` in CSS (including `style` attributes and `<style>` blocks), and web manifest icons. A link to an address that redirected, such as `/post` to `/post/`, points at the page it redirected to.
+- Off-site links are left alone, as live links. A relative link to something that isn't in the snapshot, such as a page that couldn't be fetched, is made an absolute link to the live site.
+- Rewritten HTML and CSS are stored as UTF-8, and their charset declarations are updated to say so. `original/` keeps the exact bytes that were served, so the rewritten copies can be rebuilt. The sizes and hashes in `manifest.json` are those of the files as served.
 
 ## Configuration
 
@@ -63,9 +65,12 @@ Images are tagged `latest` and with the full commit SHA.
 ```sh
 cd WebsiteArchiver
 DOMAIN=https://example.com/ docker compose -f docker-compose.local.yml run --rm --build websitearchiver
-docker compose -f docker-compose.local.yml run --rm list-blobs   # list what was archived
-docker compose -f docker-compose.local.yml down                  # remove the emulator and its data
+docker compose -f docker-compose.local.yml run --rm list-blobs     # list what was archived
+docker compose -f docker-compose.local.yml run --rm snapshot-url   # print the latest snapshot's address
+docker compose -f docker-compose.local.yml down                    # remove the emulator and its data
 ```
+
+Open the address `snapshot-url` prints, e.g. `http://localhost:10000/devstoreaccount1/archive/snapshots/2026-11-10T09-15-00Z/site/index.html`, in a browser to browse the snapshot straight from the emulator. Azurite stays running, on `localhost` only, until `down`.
 
 ### With the .NET SDK
 

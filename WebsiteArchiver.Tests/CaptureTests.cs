@@ -307,7 +307,7 @@ namespace WebsiteArchiver.Tests
             );
             await using var _ = site;
 
-            Assert.Equal(site.Rendered("/about"), run.Text("about/index.html"));
+            Assert.Equal(site.Rendered("/about"), run.OriginalText("about/index.html"));
             Assert.Empty(run.FailedAddresses);
         }
     }

@@ -4,7 +4,11 @@
 # Usage (from this directory):
 #   DOMAIN=https://example.com/ docker compose -f docker-compose.local.yml run --rm --build websitearchiver
 #   docker compose -f docker-compose.local.yml run --rm list-blobs
+#   docker compose -f docker-compose.local.yml run --rm snapshot-url
 #   docker compose -f docker-compose.local.yml down
+#
+# snapshot-url prints the address of the latest snapshot's homepage, which
+# can be opened in a browser on this machine while Azurite is running.
 #
 # DOMAIN can also be set in .env. Nothing else is read from .env, so the
 # real Azure connection string there is never used.
@@ -22,10 +26,16 @@ services:
     # The Azure SDK may use a newer storage API version than Azurite
     # recognises, so don't reject requests based on it.
     command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck
+    # Only reachable from this machine, so snapshots can be opened in a
+    # browser
+    ports:
+      - "127.0.0.1:10000:10000"
 
   # Azurite starts empty, but the archiver expects its container to exist
   # already, as it does in Azure. Retries until Azurite is accepting
-  # requests.
+  # requests. Blobs can be read without a key, so a browser can open a
+  # snapshot straight from Azurite, as it would from the $web container in
+  # production.
   create-container:
     image: mcr.microsoft.com/azure-cli:2.92.0
     depends_on:
@@ -37,7 +47,7 @@ services:
       - -c
       - |
         for attempt in $$(seq 30); do
-          az storage container create --name archive --only-show-errors --output none && exit 0
+          az storage container create --name archive --public-access blob --only-show-errors --output none && exit 0
           sleep 1
         done
         echo "Azurite didn't become available" >&2
@@ -65,3 +75,23 @@ services:
     environment:
       AZURE_STORAGE_CONNECTION_STRING: *azurite-connection-string
     command: az storage blob list --container-name archive --query "[].{name:name, size:properties.contentLength, contentType:properties.contentSettings.contentType}" --output table --only-show-errors
+
+  # Prints the address of the latest snapshot's homepage, to open in a
+  # browser. Only runs when asked for by name.
+  snapshot-url:
+    image: mcr.microsoft.com/azure-cli:2.92.0
+    profiles: [tools]
+    depends_on:
+      - azurite
+    environment:
+      AZURE_STORAGE_CONNECTION_STRING: *azurite-connection-string
+    entrypoint:
+      - sh
+      - -c
+      - |
+        az storage blob download --container-name archive --name snapshots/index.json --file /tmp/index.json --only-show-errors --output none || exit 1
+        python3 -c '
+        import json, urllib.parse
+        snapshot = json.load(open("/tmp/index.json"))["snapshots"][-1]
+        print("http://localhost:10000/devstoreaccount1/archive/snapshots/" + snapshot["id"] + "/site/" + urllib.parse.quote(snapshot["homepage"]))
+        '
