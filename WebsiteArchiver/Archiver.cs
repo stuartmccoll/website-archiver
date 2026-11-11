@@ -1,10 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Text;
 using System.Threading.Tasks;
 using HtmlAgilityPack;
 
@@ -27,6 +25,10 @@ namespace WebsiteArchiver
         private readonly List<string> failedAddresses = new();
         private readonly List<CapturedFile> files = new();
         private readonly Dictionary<string, CapturedFile> filesByPath = new(StringComparer.Ordinal);
+
+        // Addresses that weren't stored because another address had
+        // already been stored at the same path, and that path
+        private readonly Dictionary<string, string> duplicatePaths = new();
         private readonly List<SnapshotRedirect> redirects = new();
         private readonly Queue<Reference> queue = new();
 
@@ -106,6 +108,8 @@ namespace WebsiteArchiver
                 if (response != null)
                     this.Capture(reference, response);
             }
+
+            this.RewriteLinks();
 
             SnapshotManifest manifest = new()
             {
@@ -263,15 +267,22 @@ namespace WebsiteArchiver
                 mediaType == "application/manifest+json" ||
                 (reference.Kind == ReferenceKind.WebManifest && !isHtml);
 
+            CapturedFormat format =
+                isHtml ? CapturedFormat.Html :
+                isCss ? CapturedFormat.Css :
+                isWebManifest ? CapturedFormat.WebManifest :
+                CapturedFormat.Other;
+
             string path = SnapshotPaths.FromAddress(address, isHtml);
 
             if (this.filesByPath.TryGetValue(path, out CapturedFile existing))
             {
                 Console.WriteLine($"Skipping {address}, because {existing.Address} is already stored as {path}");
+                this.duplicatePaths[address.AbsoluteUri] = path;
                 return null;
             }
 
-            CapturedFile file = new(address, path, response.Content, contentType, isHtml, isHtml || isCss || isWebManifest);
+            CapturedFile file = new(address, path, response.Content, contentType, format);
             this.files.Add(file);
             this.filesByPath.Add(path, file);
 
@@ -280,16 +291,16 @@ namespace WebsiteArchiver
             if (isHtml && this.IsUnderRoot(address))
             {
                 HtmlDocument html = new();
-                html.LoadHtml(Decode(response.Content, contentType));
+                html.LoadHtml(TextDecoding.Decode(response.Content, contentType, format));
                 references = References.FromHtml(html, address);
             }
             else if (isCss)
             {
-                references = References.FromCss(Decode(response.Content, contentType), address);
+                references = References.FromCss(TextDecoding.Decode(response.Content, contentType, format), address);
             }
             else if (isWebManifest)
             {
-                references = References.FromWebManifest(Decode(response.Content, contentType), address);
+                references = References.FromWebManifest(TextDecoding.Decode(response.Content, contentType, format), address);
             }
             else
             {
@@ -353,6 +364,42 @@ namespace WebsiteArchiver
         }
 
         /// <summary>
+        /// Rewrites the links in every captured HTML page, stylesheet and
+        /// web manifest, so the snapshot can be browsed on its own. The
+        /// originals are kept as they were. If a file can't be rewritten,
+        /// its original is used in site/ as well.
+        /// </summary>
+        private void RewriteLinks()
+        {
+            Dictionary<string, string> pathsByAddress = new(this.duplicatePaths);
+
+            foreach (CapturedFile file in this.files)
+                pathsByAddress[file.Address.AbsoluteUri] = file.Path;
+
+            // Point links that redirected, e.g. from /post to /post/, at
+            // the file they redirected to
+            foreach (SnapshotRedirect redirect in this.redirects)
+            {
+                if (pathsByAddress.TryGetValue(redirect.To, out string path))
+                    pathsByAddress.TryAdd(redirect.From, path);
+            }
+
+            LinkRewriter rewriter = new(pathsByAddress);
+
+            for (int i = 0; i < this.files.Count; i++)
+            {
+                try
+                {
+                    this.files[i] = rewriter.Rewrite(this.files[i]);
+                }
+                catch (Exception exception)
+                {
+                    Console.Error.WriteLine($"Couldn't rewrite the links in {this.files[i].Address}, so it's stored unchanged: {exception.Message}");
+                }
+            }
+        }
+
+        /// <summary>
         /// Logs that an address couldn't be fetched and adds it to
         /// <see cref="FailedAddresses"/>.
         /// </summary>
@@ -363,41 +410,6 @@ namespace WebsiteArchiver
         {
             Console.Error.WriteLine($"Failed to fetch {address}: {reason}");
             this.failedAddresses.Add(address.AbsoluteUri);
-        }
-
-        /// <summary>
-        /// Decodes a text response, using the charset from its Content-Type
-        /// or a byte order mark, and UTF-8 otherwise. Only used to find
-        /// references; the file is stored as its original bytes.
-        /// </summary>
-        /// <param name="content">The response body.</param>
-        /// <param name="contentType">The response's Content-Type.</param>
-        /// <returns>The decoded text.</returns>
-        private static string Decode(byte[] content, string contentType)
-        {
-            Encoding encoding = Encoding.UTF8;
-            string charset = contentType
-                .Split(';')
-                .Skip(1)
-                .Select(parameter => parameter.Split('=', 2))
-                .Where(pair => pair.Length == 2 && pair[0].Trim().Equals("charset", StringComparison.OrdinalIgnoreCase))
-                .Select(pair => pair[1].Trim().Trim('"'))
-                .FirstOrDefault();
-
-            if (charset != null)
-            {
-                try
-                {
-                    encoding = Encoding.GetEncoding(charset);
-                }
-                catch (ArgumentException)
-                {
-                    // An unknown charset: UTF-8 is the best guess
-                }
-            }
-
-            using StreamReader reader = new(new MemoryStream(content), encoding, detectEncodingFromByteOrderMarks: true);
-            return reader.ReadToEnd();
         }
 
         /// <summary>

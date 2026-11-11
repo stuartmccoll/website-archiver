@@ -1,4 +1,5 @@
-﻿using WebsiteArchiver.Tests.Fakes;
+﻿using System.Text;
+using WebsiteArchiver.Tests.Fakes;
 
 namespace WebsiteArchiver.Tests
 {
@@ -42,6 +43,16 @@ namespace WebsiteArchiver.Tests
         /// </summary>
         public static string Body(string markup) =>
             $"<!DOCTYPE html><html><head><title>Test</title></head><body>{markup}</body></html>";
+
+        /// <summary>
+        /// Encodes text as windows-1252, for testing pages that aren't
+        /// UTF-8.
+        /// </summary>
+        public static byte[] Windows1252(string text)
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding("windows-1252").GetBytes(text);
+        }
 
         /// <summary>
         /// Starts a fake website serving /css/site.css plus whatever

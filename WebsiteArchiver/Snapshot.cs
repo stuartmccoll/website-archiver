@@ -11,6 +11,25 @@ using System.Threading.Tasks;
 namespace WebsiteArchiver
 {
     /// <summary>
+    /// What kind of file was captured, which decides whether it has links
+    /// to rewrite.
+    /// </summary>
+    public enum CapturedFormat
+    {
+        /// <summary>Any other file, which is stored as it is.</summary>
+        Other,
+
+        /// <summary>An HTML page.</summary>
+        Html,
+
+        /// <summary>A stylesheet.</summary>
+        Css,
+
+        /// <summary>A web app manifest.</summary>
+        WebManifest,
+    }
+
+    /// <summary>
     /// A file fetched during a crawl, held in memory until the snapshot is
     /// published.
     /// </summary>
@@ -20,18 +39,33 @@ namespace WebsiteArchiver
     /// <see cref="SnapshotPaths.FromAddress"/>.</param>
     /// <param name="Content">The response body, byte for byte.</param>
     /// <param name="ContentType">The response's Content-Type.</param>
-    /// <param name="IsHtml">Whether the file was served as HTML.</param>
-    /// <param name="KeepOriginal">Whether a copy also goes in original/.
-    /// True for the HTML, CSS and web manifests that links will be
-    /// rewritten in.</param>
+    /// <param name="Format">What kind of file it is.</param>
     public record CapturedFile(
         Uri Address,
         string Path,
         byte[] Content,
         string ContentType,
-        bool IsHtml,
-        bool KeepOriginal
-    );
+        CapturedFormat Format
+    )
+    {
+        /// <summary>
+        /// Whether a copy also goes in original/. True for the HTML, CSS
+        /// and web manifests that links are rewritten in.
+        /// </summary>
+        public bool KeepOriginal => this.Format != CapturedFormat.Other;
+
+        /// <summary>
+        /// The copy that goes in site/, with its links rewritten, or null
+        /// if it's the same as <see cref="Content"/>.
+        /// </summary>
+        public byte[] SiteContent { get; init; }
+
+        /// <summary>
+        /// The Content-Type of <see cref="SiteContent"/>, or null if it's
+        /// the same as <see cref="ContentType"/>.
+        /// </summary>
+        public string SiteContentType { get; init; }
+    }
 
     /// <summary>
     /// A redirect followed during a crawl, e.g. from /post to /post/.
@@ -46,10 +80,12 @@ namespace WebsiteArchiver
     /// <param name="Url">The address the file was served from.</param>
     /// <param name="Path">Its path inside site/ (and original/, if it has
     /// one).</param>
-    /// <param name="ContentType">Its Content-Type.</param>
-    /// <param name="Size">Its size in bytes.</param>
-    /// <param name="Sha256">The SHA-256 hash of its contents, in
-    /// lowercase hex.</param>
+    /// <param name="ContentType">The Content-Type it was served
+    /// with.</param>
+    /// <param name="Size">Its size in bytes, as served.</param>
+    /// <param name="Sha256">The SHA-256 hash of its contents as served,
+    /// in lowercase hex. For a file with an original, that's the
+    /// original's, not the rewritten copy's.</param>
     /// <param name="HasOriginal">Whether an unmodified copy is kept in
     /// original/.</param>
     public record SnapshotFile(
@@ -194,12 +230,20 @@ namespace WebsiteArchiver
                 new ParallelOptions { MaxDegreeOfParallelism = MaxParallelUploads },
                 async (file, cancellationToken) =>
                 {
-                    BinaryData contents = BinaryData.FromBytes(file.Content);
-
-                    await storage.UploadBlob($"{prefix}site/{file.Path}", contents, file.ContentType);
+                    await storage.UploadBlob(
+                        $"{prefix}site/{file.Path}",
+                        BinaryData.FromBytes(file.SiteContent ?? file.Content),
+                        file.SiteContentType ?? file.ContentType
+                    );
 
                     if (file.KeepOriginal)
-                        await storage.UploadBlob($"{prefix}original/{file.Path}", contents, file.ContentType);
+                    {
+                        await storage.UploadBlob(
+                            $"{prefix}original/{file.Path}",
+                            BinaryData.FromBytes(file.Content),
+                            file.ContentType
+                        );
+                    }
                 }
             );
 

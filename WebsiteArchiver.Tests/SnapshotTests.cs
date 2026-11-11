@@ -98,11 +98,41 @@ namespace WebsiteArchiver.Tests
                 run.Originals.Keys.Order(StringComparer.Ordinal)
             );
 
+            Assert.Equal(site.Rendered("/"), run.OriginalText("index.html"));
+            Assert.Equal(site.Rendered("/posts/first/"), run.OriginalText("posts/first/index.html"));
+            Assert.Equal(Css, run.OriginalText("css/site.css"));
+            Assert.Equal("{ \"icons\": [] }", run.OriginalText("site.webmanifest"));
+
             foreach ((string path, FakeBlobStorage.StoredBlob original) in run.Originals)
             {
-                Assert.Equal(run.Files[path].Contents, original.Contents);
-                Assert.Equal(run.Files[path].ContentType, original.ContentType);
+                JsonElement file = run.Manifest.GetProperty("files")
+                    .EnumerateArray()
+                    .Single(file => file.GetProperty("path").GetString() == path);
+
+                Assert.Equal(file.GetProperty("contentType").GetString(), original.ContentType);
+                Assert.Equal(file.GetProperty("size").GetInt64(), original.Contents.Length);
+                Assert.Equal(file.GetProperty("sha256").GetString(), Convert.ToHexStringLower(SHA256.HashData(original.Contents)));
             }
+        }
+
+        [Fact]
+        public async Task OriginalOfARewrittenPage_KeepsItsExactBytes()
+        {
+            // windows-1252, so the rewritten UTF-8 copy differs in more
+            // than its links
+            byte[] page = Windows1252(
+                "<html><head><meta charset=\"windows-1252\"></head><body><a href=\"/café/\">Café</a></body></html>"
+            );
+
+            var (site, run) = await ArchiveAsync(s => s
+                .WithFile("/", page, "text/html")
+                .WithPage("/café/", Body("<p>Menu</p>"))
+            );
+            await using var _ = site;
+
+            Assert.Equal(page, run.Originals["index.html"].Contents);
+            Assert.Equal("text/html", run.Originals["index.html"].ContentType);
+            Assert.NotEqual(page, run.Files["index.html"].Contents);
         }
 
         [Fact]
