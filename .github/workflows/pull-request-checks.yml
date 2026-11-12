@@ -33,6 +33,17 @@ jobs:
       - name: Run tests
         run: dotnet test
 
+  # Compiles the Bicep with the latest Bicep CLI, which the Azure CLI on
+  # the runner downloads, so errors show up before the template is deployed
+  bicep-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build Bicep
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
   # Builds the image the same way the deployment workflow does, but
   # without pushing it, so Dockerfile problems show up before merging
   docker-build:
