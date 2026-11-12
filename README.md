@@ -39,7 +39,7 @@ Each run also uploads a viewer, [`WebsiteArchiver/viewer/index.html`](WebsiteArc
 
 The address records the snapshot and page, so links like `…/#2026-11-09T14-05-00Z/posts/my-post/` can be shared or bookmarked. Links that leave the snapshot, such as to other sites, open in a new tab.
 
-The viewer is built into the app, so it always matches the snapshot format. To serve it, enable [static website hosting](https://learn.microsoft.com/azure/storage/blobs/storage-blob-static-website) on the storage account with `index.html` as the index document, and set `AZURE_BLOB_STORAGE_CONTAINER_NAME` to `$web`.
+The viewer is built into the app, so it always matches the snapshot format. To serve it, enable [static website hosting](https://learn.microsoft.com/azure/storage/blobs/storage-blob-static-website) on the storage account with `index.html` as the index document, and set `AZURE_BLOB_STORAGE_CONTAINER_NAME` to `$web`. [`infra/`](infra/README.md) has Bicep that creates the storage account, and the steps to deploy it.
 
 ## Configuration
 
@@ -48,8 +48,24 @@ Everything is configured through environment variables:
 | Variable | Description |
 |---|---|
 | `DOMAIN` | The site to archive, e.g. `https://example.com/`. Must be an `http` or `https` URL. |
+| `AZURE_BLOB_STORAGE_CONTAINER_NAME` | The blob container to upload to, `$web` to serve the viewer. It must already exist. |
+
+Then either a connection string, which includes the account key:
+
+| Variable | Description |
+|---|---|
 | `AZURE_BLOB_STORAGE_CONNECTION_STRING` | Connection string for the Azure Storage account. |
-| `AZURE_BLOB_STORAGE_CONTAINER_NAME` | The blob container to upload to. It must already exist. |
+
+Or, without any keys, an endpoint plus [workload identity](https://learn.microsoft.com/entra/workload-id/workload-identity-federation), which is how the archival workflow signs in with its GitHub OIDC token:
+
+| Variable | Description |
+|---|---|
+| `AZURE_BLOB_STORAGE_ENDPOINT` | The account's blob endpoint, e.g. `https://<account>.blob.core.windows.net/`. |
+| `AZURE_TENANT_ID` | The managed identity's tenant. |
+| `AZURE_CLIENT_ID` | The managed identity's client ID. |
+| `AZURE_FEDERATED_TOKEN_FILE` | A file holding a token the identity trusts, such as a GitHub OIDC token. |
+
+The archiver signs in before it starts crawling, so a short-lived token is exchanged while it's still valid. Any missing or conflicting setting is reported before anything is fetched.
 
 ## Running it
 
