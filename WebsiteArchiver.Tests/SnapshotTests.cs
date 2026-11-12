@@ -163,14 +163,49 @@ namespace WebsiteArchiver.Tests
         }
 
         [Fact]
-        public async Task Index_IsWrittenLast_AfterTheManifest()
+        public async Task Index_IsWrittenLast_AfterTheManifestAndViewer()
         {
             var (site, run) = await ArchiveAsync(ConfigureSmallSite);
             await using var _ = site;
 
-            Assert.Equal(IndexName, run.Uploads[^1]);
-            Assert.EndsWith("/manifest.json", run.Uploads[^2]);
+            // The viewer goes up before the index, so a newly listed
+            // snapshot is never shown by an older viewer
+            Assert.Equal(
+                new[] { $"snapshots/{run.SnapshotId}/manifest.json", Viewer.BlobName, IndexName },
+                run.Uploads.TakeLast(3)
+            );
             Assert.Single(run.Uploads, name => name == IndexName);
+            Assert.Single(run.Uploads, name => name == Viewer.BlobName);
+        }
+
+        [Fact]
+        public async Task Viewer_IsPublishedAtTheContainerRoot_ReplacingAnyOlderVersion()
+        {
+            await using FakeBlobStorage storage = await FakeBlobStorage.StartAsync();
+            storage.Seed("index.html", "<p>An older viewer</p>", "text/html");
+
+            var (site, run) = await ArchiveAsync(ConfigureSmallSite, storage: storage);
+            await using var _ = site;
+
+            FakeBlobStorage.StoredBlob viewer = run.AllBlobs["index.html"];
+            Assert.Equal(File.ReadAllBytes(ViewerSourcePath()), viewer.Contents);
+            Assert.Equal("text/html; charset=utf-8", viewer.ContentType);
+            Assert.Equal("no-cache", viewer.CacheControl);
+        }
+
+        /// <summary>
+        /// Finds WebsiteArchiver/viewer/index.html in the repo, by walking
+        /// up from the test's output folder to the solution.
+        /// </summary>
+        private static string ViewerSourcePath()
+        {
+            for (DirectoryInfo? folder = new(AppContext.BaseDirectory); folder != null; folder = folder.Parent)
+            {
+                if (File.Exists(Path.Combine(folder.FullName, "WebsiteArchiver.sln")))
+                    return Path.Combine(folder.FullName, "WebsiteArchiver", "viewer", "index.html");
+            }
+
+            throw new InvalidOperationException("Couldn't find WebsiteArchiver.sln above " + AppContext.BaseDirectory);
         }
 
         [Fact]

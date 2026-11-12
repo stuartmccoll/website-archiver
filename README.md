@@ -16,6 +16,7 @@ It's built to archive [stuartmccoll.github.io](https://stuartmccoll.github.io/) 
 ## How snapshots are stored
 
 ```
+index.html                               the viewer, for browsing snapshots
 snapshots/index.json                     a list of every snapshot
 snapshots/2026-11-10T09-15-00Z/          one folder per run, named after its start time in UTC (with -2 added if two runs start in the same second)
   manifest.json                          what the snapshot contains
@@ -31,6 +32,14 @@ snapshots/2026-11-10T09-15-00Z/          one folder per run, named after its sta
 - `site/` can be browsed on its own, from wherever it's served. Every link to a file in the snapshot is rewritten as a path relative to the page or stylesheet it's in, e.g. `../../css/site.css` or `about/index.html#team`. That covers `href` and `src`, `srcset`, `poster`, `<base href>`, `url(…)` and `@import` in CSS (including `style` attributes and `<style>` blocks), and web manifest icons. A link to an address that redirected, such as `/post` to `/post/`, points at the page it redirected to.
 - Off-site links are left alone, as live links. A relative link to something that isn't in the snapshot, such as a page that couldn't be fetched, is made an absolute link to the live site.
 - Rewritten HTML and CSS are stored as UTF-8, and their charset declarations are updated to say so. `original/` keeps the exact bytes that were served, so the rewritten copies can be rebuilt. The sizes and hashes in `manifest.json` are those of the files as served.
+
+## The viewer
+
+Each run also uploads a viewer, [`WebsiteArchiver/viewer/index.html`](WebsiteArchiver/viewer/index.html), to `index.html` at the root of the container. It's a single static page with no build step. It lists every snapshot, newest first, with its date and time, its page count, and a warning if it's incomplete. Choose one to browse it in a frame, under a banner saying when it was archived, with links to open the page full-screen or to see the live version.
+
+The address records the snapshot and page, so links like `…/#2026-11-09T14-05-00Z/posts/my-post/` can be shared or bookmarked. Links that leave the snapshot, such as to other sites, open in a new tab.
+
+The viewer is built into the app, so it always matches the snapshot format. To serve it, enable [static website hosting](https://learn.microsoft.com/azure/storage/blobs/storage-blob-static-website) on the storage account with `index.html` as the index document, and set `AZURE_BLOB_STORAGE_CONTAINER_NAME` to `$web`.
 
 ## Configuration
 
@@ -66,11 +75,11 @@ Images are tagged `latest` and with the full commit SHA.
 cd WebsiteArchiver
 DOMAIN=https://example.com/ docker compose -f docker-compose.local.yml run --rm --build websitearchiver
 docker compose -f docker-compose.local.yml run --rm list-blobs     # list what was archived
-docker compose -f docker-compose.local.yml run --rm snapshot-url   # print the latest snapshot's address
+docker compose -f docker-compose.local.yml run --rm snapshot-url   # print the viewer's address for the latest snapshot
 docker compose -f docker-compose.local.yml down                    # remove the emulator and its data
 ```
 
-Open the address `snapshot-url` prints, e.g. `http://localhost:10000/devstoreaccount1/archive/snapshots/2026-11-10T09-15-00Z/site/index.html`, in a browser to browse the snapshot straight from the emulator. Azurite stays running, on `localhost` only, until `down`.
+Open the address `snapshot-url` prints, e.g. `http://localhost:10000/devstoreaccount1/archive/index.html#2026-11-10T09-15-00Z/`, in a browser to browse the snapshot in the viewer, straight from the emulator. Azurite stays running, on `localhost` only, until `down`.
 
 ### With the .NET SDK
 

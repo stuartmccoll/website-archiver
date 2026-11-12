@@ -7,8 +7,8 @@
 #   docker compose -f docker-compose.local.yml run --rm snapshot-url
 #   docker compose -f docker-compose.local.yml down
 #
-# snapshot-url prints the address of the latest snapshot's homepage, which
-# can be opened in a browser on this machine while Azurite is running.
+# snapshot-url prints the address of the latest snapshot in the viewer,
+# which can be opened in a browser on this machine while Azurite is running.
 #
 # DOMAIN can also be set in .env. Nothing else is read from .env, so the
 # real Azure connection string there is never used.
@@ -76,7 +76,7 @@ services:
       AZURE_STORAGE_CONNECTION_STRING: *azurite-connection-string
     command: az storage blob list --container-name archive --query "[].{name:name, size:properties.contentLength, contentType:properties.contentSettings.contentType}" --output table --only-show-errors
 
-  # Prints the address of the latest snapshot's homepage, to open in a
+  # Prints the address of the latest snapshot in the viewer, to open in a
   # browser. Only runs when asked for by name.
   snapshot-url:
     image: mcr.microsoft.com/azure-cli:2.92.0
@@ -91,7 +91,7 @@ services:
       - |
         az storage blob download --container-name archive --name snapshots/index.json --file /tmp/index.json --only-show-errors --output none || exit 1
         python3 -c '
-        import json, urllib.parse
+        import json
         snapshot = json.load(open("/tmp/index.json"))["snapshots"][-1]
-        print("http://localhost:10000/devstoreaccount1/archive/snapshots/" + snapshot["id"] + "/site/" + urllib.parse.quote(snapshot["homepage"]))
+        print("http://localhost:10000/devstoreaccount1/archive/index.html#" + snapshot["id"] + "/")
         '

@@ -17,6 +17,8 @@ The owner runs it only against their own personal website, so `DOMAIN` is truste
   - `TextDecoding.cs`: decodes HTML, CSS and manifests. The encoding comes from the BOM, then the `Content-Type` charset, then `<meta charset>` (HTML) or `@charset` (CSS), and otherwise UTF-8. Labels such as `iso-8859-1` are read as windows-1252, as browsers do
   - `SnapshotPaths.cs`: maps an address to its path in a snapshot. Paths mirror the URL from the host's root and are percent-decoded: `/posts/x/` becomes `posts/x/index.html`, an HTML page at `/about` becomes `about/index.html`, and other files keep their names, e.g. `css/site.css`. If two addresses map to the same path, the first one wins
   - `Snapshot.cs`: the manifest and index formats, and publishing. See Snapshot layout
+  - `Viewer.cs`: uploads the viewer, which is embedded in the app as a resource, to `index.html` at the container root with `Cache-Control: no-cache`
+  - `viewer/index.html`: the snapshot viewer. One static page in plain HTML, CSS and JavaScript, with no build step, framework or external resources. It lists `snapshots/index.json` newest first (date and time, page count, an incomplete warning) and shows the chosen snapshot in an iframe, under a banner with the archive time, the current page, a snapshot picker, and links to open the page full-screen or see the live version. The address holds the snapshot and page, e.g. `#2026-11-09T14-05-00Z/posts/x/`. The page is the URL path, so `posts/x/index.html` appears as `posts/x/`. Because it's served from the same address as the snapshots, it reads the frame's location to keep the banner and address in step (with `replaceState`, so the back button isn't doubled), and makes links that leave the snapshot open in a new tab. It reads each snapshot's manifest to find live URLs and to check that a page exists; an address for a page that isn't in the snapshot shows its homepage, with a notice. It's uploaded on every run, so changes to the index or manifest format must keep it in step
   - `AzureBlobStorageClient.cs`: uploads blobs with their `Content-Type`, and updates a blob with an optimistic-concurrency loop: read with its ETag, write with `If-Match` (or `If-None-Match: *` if it didn't exist), and retry from a fresh read on 412 or 409
 - `WebsiteArchiver.Tests/`: xUnit end-to-end tests (see Testing)
 - `.github/workflows/pull-request-checks.yml`: on pull requests to `main`, checks formatting (`dotnet format --verify-no-changes`), runs `dotnet test`, and builds the Docker image without pushing it. It can also be run manually
@@ -30,6 +32,7 @@ The owner runs it only against their own personal website, so `DOMAIN` is truste
 Each run publishes one snapshot to the configured container. The container will be `$web` in production, so Azure static website hosting can serve it:
 
 ```
+index.html                               the viewer, replaced on every run
 snapshots/index.json                     every published snapshot, read by the viewer
 snapshots/2026-11-10T09-15-00Z/          one folder per run, named after its UTC start time
   manifest.json                          root, status, failed addresses, redirects, and every file's URL, path, type, size and SHA-256
@@ -41,9 +44,9 @@ snapshots/2026-11-10T09-15-00Z/          one folder per run, named after its UTC
 - Absolute references to anything not captured, including every off-site link and scheme-relative `//host/` links, are left unchanged. A relative reference to something not captured (a failed fetch, or a page outside the root) becomes an absolute link to the live site, because it would be broken in the snapshot
 - Every HTML, CSS and manifest file in `site/` is re-encoded as UTF-8, even if no links changed. Its blob's `Content-Type` gets `charset=utf-8`, and `<meta charset>`, `<meta http-equiv="Content-Type">` and `@charset` are updated to match. No declaration is added to a page that has none. `original/` keeps the exact bytes, so rewritten copies can be regenerated. The manifest's `contentType`, `size` and `sha256` describe the file as served, i.e. the original
 - Before uploading anything, a run claims its folder by creating a placeholder `manifest.json` with `If-None-Match: *`. If another run started in the same second and got there first, `-2`, `-3` and so on are added to the ID, e.g. `2026-11-10T09-15-00Z-2`
-- Files are uploaded next, then the real `manifest.json`, and `index.json` last, so a half-uploaded snapshot is never listed. Updates to `index.json` keep existing entries and any properties this version doesn't know about. If `index.json` isn't in the expected format, the run fails rather than overwriting it
+- Files are uploaded next, then the real `manifest.json`, then the viewer, and `index.json` last, so a half-uploaded snapshot is never listed, and a newly listed one is never shown by an older viewer. Updates to `index.json` keep existing entries and any properties this version doesn't know about. If `index.json` isn't in the expected format, the run fails rather than overwriting it
 - A run with failures is still published, with `"status": "incomplete"` and its `failedAddresses` in both the manifest and the index
-- Blobs keep the `Content-Type` they were served with, or `application/octet-stream` if they had none. `index.json` is served with `Cache-Control: no-cache`
+- Blobs keep the `Content-Type` they were served with, or `application/octet-stream` if they had none. `index.json` and the viewer are served with `Cache-Control: no-cache`
 
 ## Configuration
 
@@ -76,7 +79,7 @@ To test the Docker image without Azure, use `docker-compose.local.yml`. It runs 
 ```sh
 DOMAIN=https://example.com/ docker compose -f docker-compose.local.yml run --rm --build websitearchiver
 docker compose -f docker-compose.local.yml run --rm list-blobs     # show what was uploaded
-docker compose -f docker-compose.local.yml run --rm snapshot-url   # print the latest snapshot's homepage URL
+docker compose -f docker-compose.local.yml run --rm snapshot-url   # print the latest snapshot's address in the viewer
 docker compose -f docker-compose.local.yml down                    # remove Azurite and its data
 ```
 
