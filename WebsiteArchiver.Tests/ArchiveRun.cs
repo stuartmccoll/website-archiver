@@ -148,7 +148,7 @@ namespace WebsiteArchiver.Tests
 
                 IReadOnlyList<string> uploads = ownStorage.Uploads;
                 Assert.All(
-                    uploads.Where(name => name != "snapshots/index.json"),
+                    uploads.Where(name => name != "snapshots/index.json" && name != Viewer.BlobName),
                     name => Assert.StartsWith($"snapshots/{archiver.SnapshotId}/", name)
                 );
 

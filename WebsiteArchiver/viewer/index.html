@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Website archive</title>
+<!--
+  The snapshot viewer. The archiver uploads this file to the root of the
+  container on every run, next to snapshots/, so it always matches the
+  snapshot format. It must be served from the same address as the
+  snapshots, so it can see which page the frame is showing.
+
+  Addresses look like #2026-11-09T14-05-00Z/posts/x/: a snapshot ID, then
+  the page's path within the site, as it appears in the page's URL.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f2;
+    --surface: #ffffff;
+    --text: #1c1c1a;
+    --muted: #5d5d58;
+    --border: #d8d8d2;
+    --accent: #1a5bb8;
+    --hover: #eef3fb;
+    --warn-bg: #fdf3d6;
+    --warn-text: #5e4100;
+    --warn-border: #e5c463;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514;
+      --surface: #1f1f1d;
+      --text: #ebebe7;
+      --muted: #a5a59e;
+      --border: #3a3a36;
+      --accent: #84b3ff;
+      --hover: #24364f;
+      --warn-bg: #3b2f0e;
+      --warn-text: #f4d78f;
+      --warn-border: #725d1d;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.45;
+  }
+
+  a { color: var(--accent); }
+
+  [hidden] { display: none !important; }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* The list of snapshots */
+
+  .list {
+    width: 100%;
+    max-width: 44rem;
+    margin: 0 auto;
+    padding: 2.5rem 1rem 3rem;
+  }
+
+  .list h1 { margin: 0 0 0.25rem; font-size: 1.6rem; line-height: 1.2; }
+
+  .lede, .status { margin: 0 0 1.5rem; color: var(--muted); }
+
+  .status.error { color: var(--warn-text); }
+
+  .snapshots {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .snapshots li + li { border-top: 1px solid var(--border); }
+
+  .snapshots a {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.2rem 1rem;
+    padding: 0.8rem 1rem;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .snapshots a:hover, .snapshots a:focus-visible { background: var(--hover); }
+
+  .when { font-weight: 600; }
+
+  .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .snapshots .badge { margin-left: auto; }
+
+  .badge {
+    display: inline-block;
+    padding: 0 0.55rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--warn-text);
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  /* The banner above a snapshot */
+
+  .banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 1rem;
+    padding: 0.55rem 1rem;
+    font-size: 0.9rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .archived { margin: 0; font-weight: 600; }
+
+  .page {
+    min-width: 0;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  .page code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 1rem;
+    margin-left: auto;
+  }
+
+  .actions select { max-width: 100%; font: inherit; }
+
+  .incomplete { position: relative; }
+
+  .incomplete summary { cursor: pointer; list-style: none; }
+
+  .incomplete summary::-webkit-details-marker { display: none; }
+
+  .failed {
+    position: absolute;
+    z-index: 1;
+    top: calc(100% + 0.4rem);
+    left: 0;
+    width: min(32rem, calc(100vw - 2rem));
+    max-height: 50vh;
+    overflow: auto;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
+  }
+
+  .failed p { margin: 0 0 0.4rem; }
+
+  .failed ul { margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+
+  .notice {
+    flex-basis: 100%;
+    margin: 0;
+    padding: 0.35rem 0.6rem;
+    color: var(--warn-text);
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 6px;
+  }
+
+  /* Archived pages expect a white page behind them, whatever the theme */
+  iframe {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    border: 0;
+    background: #ffffff;
+  }
+</style>
+</head>
+<body>
+<main class="list" id="list-view">
+  <h1 id="heading">Website archive</h1>
+  <p class="lede" id="lede" hidden></p>
+  <p class="status" id="status" role="status">Loading snapshots…</p>
+  <ol class="snapshots" id="snapshot-list" hidden></ol>
+  <noscript><p>The viewer needs JavaScript. Each snapshot can still be browsed directly, at snapshots/&lt;id&gt;/site/index.html.</p></noscript>
+</main>
+
+<header class="banner" id="banner" hidden>
+  <a href="#">← All snapshots</a>
+  <p class="archived" id="archived"></p>
+  <details class="incomplete" id="incomplete" hidden>
+    <summary class="badge">Incomplete</summary>
+    <div class="failed">
+      <p id="failed-summary"></p>
+      <ul id="failed-list"></ul>
+    </div>
+  </details>
+  <span class="page" id="page"><span class="visually-hidden">Page: </span><code id="page-path"></code></span>
+  <span class="actions">
+    <label><span class="visually-hidden">Snapshot</span><select id="picker"></select></label>
+    <a id="full-screen">Open full-screen</a>
+    <a id="live" target="_blank" rel="noopener">Live version ↗</a>
+  </span>
+  <p class="notice" id="notice" role="status" hidden></p>
+</header>
+
+<iframe id="frame" title="Archived page" hidden></iframe>
+
+<script>
+(() => {
+  'use strict';
+
+  const snapshotsBase = new URL('snapshots/', document.baseURI);
+  const indexUrl = new URL('index.json', snapshotsBase);
+
+  const element = id => document.getElementById(id);
+  const listView = element('list-view');
+  const heading = element('heading');
+  const lede = element('lede');
+  const status = element('status');
+  const list = element('snapshot-list');
+  const banner = element('banner');
+  const archived = element('archived');
+  const incomplete = element('incomplete');
+  const failedSummary = element('failed-summary');
+  const failedList = element('failed-list');
+  const pagePath = element('page-path');
+  const picker = element('picker');
+  const fullScreen = element('full-screen');
+  const live = element('live');
+  const notice = element('notice');
+  const frame = element('frame');
+
+  const dateFormat = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric',
+  });
+  const timeFormat = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  });
+
+  // Every snapshot in index.json, newest first
+  let snapshots = [];
+  // Each snapshot's files, from its manifest: a Map from path to the URL it
+  // was archived from, or null if the manifest couldn't be loaded
+  const manifests = new Map();
+  // The snapshot and page being shown, or null on the list. page is null
+  // when the frame has left the snapshot.
+  let current = null;
+  // Incremented on every route, so an older route that's still waiting
+  // for a manifest knows it has been overtaken
+  let routeCount = 0;
+  let routing = false;
+  // The page the notice was shown for, so it's hidden once you move on
+  let noticePage = null;
+
+  /** The time a snapshot was taken, e.g. "9 November 2026, 14:05 UTC". */
+  function formatTime(snapshot) {
+    const date = new Date(snapshot.startedAt);
+    if (Number.isNaN(date.getTime())) return snapshot.id;
+    return `${dateFormat.format(date)}, ${timeFormat.format(date)} UTC`;
+  }
+
+  function count(n, one, many) {
+    return `${n} ${n === 1 ? one : many}`;
+  }
+
+  function encodePath(path) {
+    return path.split('/').map(encodeURIComponent).join('/');
+  }
+
+  /** Percent-decodes a path, as manifests store them, or returns null. */
+  function decodePath(path) {
+    try {
+      return path.split('/').map(decodeURIComponent).join('/');
+    } catch {
+      return null;
+    }
+  }
+
+  /** A file's path in site/ as a page in the address: posts/x/index.html is posts/x/. */
+  function pageFromFile(file) {
+    return file.replace(/(^|\/)index\.html$/, '$1');
+  }
+
+  /** The reverse of pageFromFile: posts/x/ is posts/x/index.html. */
+  function fileFromPage(page) {
+    return page === '' || page.endsWith('/') ? page + 'index.html' : page;
+  }
+
+  function siteBase(snapshot) {
+    return new URL(`${encodeURIComponent(snapshot.id)}/site/`, snapshotsBase);
+  }
+
+  function homepage(snapshot) {
+    return pageFromFile(encodePath(typeof snapshot.homepage === 'string' ? snapshot.homepage : 'index.html'));
+  }
+
+  function withoutHash(url) {
+    return url.split('#')[0];
+  }
+
+  /** Loads a snapshot's manifest once, resolving to its files, or null. */
+  function loadManifest(snapshot) {
+    if (!manifests.has(snapshot.id)) {
+      const name = typeof snapshot.manifest === 'string' ? snapshot.manifest : `${snapshot.id}/manifest.json`;
+
+      manifests.set(snapshot.id, fetch(new URL(name, snapshotsBase))
+        .then(response => {
+          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+          return response.json();
+        })
+        .then(manifest => {
+          const files = new Map();
+          for (const file of Array.isArray(manifest.files) ? manifest.files : []) {
+            if (file && typeof file.path === 'string') files.set(file.path, file.url);
+          }
+          return files;
+        })
+        .catch(error => {
+          console.warn(`Couldn't load the manifest for ${snapshot.id}:`, error);
+          return null;
+        }));
+    }
+
+    return manifests.get(snapshot.id);
+  }
+
+  /** The files each snapshot's manifest lists, once it has loaded. */
+  const loadedFiles = new Map();
+
+  /** Whether a page is in the snapshot, or null if that isn't known. */
+  function isInSnapshot(snapshot, page) {
+    const files = loadedFiles.get(snapshot.id);
+    if (!files) return null;
+    const path = decodePath(fileFromPage(page));
+    return path !== null && files.has(path);
+  }
+
+  /**
+   * Works out which page to show for one asked for in the address. An
+   * address without a trailing slash, such as about, is taken as about/ if
+   * that's what the snapshot has. A page that isn't in the snapshot falls
+   * back to the homepage.
+   */
+  function resolve(snapshot, page) {
+    if (page === null || page === '') return { page: homepage(snapshot), missing: null };
+    if (isInSnapshot(snapshot, page) !== false) return { page, missing: null };
+    if (!page.endsWith('/') && isInSnapshot(snapshot, page + '/')) return { page: page + '/', missing: null };
+    return { page: homepage(snapshot), missing: page };
+  }
+
+  /** The address a page was archived from. */
+  function liveUrl(snapshot, page) {
+    const files = loadedFiles.get(snapshot.id);
+    const path = decodePath(fileFromPage(page));
+    const url = files && path !== null ? files.get(path) : null;
+    if (typeof url === 'string') return url;
+
+    // Paths mirror the URL from the host's root
+    try {
+      return new URL('/' + page, snapshot.root).href;
+    } catch {
+      return null;
+    }
+  }
+
+  function displayPath(page) {
+    return '/' + (decodePath(page) ?? page);
+  }
+
+  function showNotice(message, page) {
+    notice.textContent = message ?? '';
+    notice.hidden = !message;
+    noticePage = message ? page : null;
+  }
+
+  function showList(message) {
+    current = null;
+    banner.hidden = true;
+    frame.hidden = true;
+    listView.hidden = false;
+    status.textContent = message ?? '';
+    status.hidden = !message;
+    status.classList.toggle('error', Boolean(message));
+    document.title = heading.textContent;
+
+    // So an archived page doesn't keep running, or playing, out of sight
+    try {
+      if (frame.contentWindow.location.href === 'about:blank') return;
+    } catch {
+      // The frame is showing another site
+    }
+    frame.contentWindow.location.replace('about:blank');
+  }
+
+  function showSnapshot(snapshot) {
+    listView.hidden = true;
+    banner.hidden = false;
+    frame.hidden = false;
+
+    archived.textContent = `Archived ${formatTime(snapshot)}`;
+    picker.value = snapshot.id;
+
+    const failed = Array.isArray(snapshot.failedAddresses) ? snapshot.failedAddresses : [];
+    incomplete.hidden = snapshot.status !== 'incomplete';
+    incomplete.open = false;
+    failedSummary.textContent = failed.length
+      ? `${count(failed.length, "address", "addresses")} couldn't be archived, so links to them go to the live site:`
+      : 'Some addresses couldn\'t be archived.';
+    failedList.replaceChildren(...failed.map(address => {
+      const item = document.createElement('li');
+      item.textContent = String(address);
+      return item;
+    }));
+  }
+
+  /** Updates the banner's page, links and the tab's title. */
+  function showPage() {
+    const { snapshot, page } = current;
+
+    if (page === null) {
+      pagePath.textContent = 'Outside this snapshot';
+      fullScreen.hidden = true;
+      live.hidden = true;
+    } else {
+      pagePath.textContent = displayPath(page);
+      fullScreen.hidden = false;
+      fullScreen.href = new URL(fileFromPage(page), siteBase(snapshot)).href;
+
+      const url = liveUrl(snapshot, page);
+      live.hidden = !url;
+      if (url) live.href = url;
+
+      const hash = `#${snapshot.id}/${page}`;
+      if (location.hash !== hash) history.replaceState(history.state, '', hash);
+    }
+
+    let title = '';
+    try {
+      title = frame.contentDocument?.title?.trim() ?? '';
+    } catch {
+      // The frame is showing another site
+    }
+
+    frame.title = title ? `Archived page: ${title}` : 'Archived page';
+    document.title = `${title || (page === null ? 'Elsewhere' : displayPath(page))} · Archived ${formatTime(snapshot)}`;
+  }
+
+  /** Shows whatever the address asks for. */
+  async function route() {
+    const thisRoute = ++routeCount;
+    routing = false;
+    const hash = location.hash.slice(1);
+
+    if (!hash) {
+      showList(null);
+      return;
+    }
+
+    const slash = hash.indexOf('/');
+    const id = slash < 0 ? hash : hash.slice(0, slash);
+    const page = slash < 0 ? null : hash.slice(slash + 1);
+    const snapshot = snapshots.find(s => s.id === id);
+
+    if (!snapshot) {
+      showList(`There's no snapshot called ${decodePath(id) ?? id}. Choose one below.`);
+      return;
+    }
+
+    showSnapshot(snapshot);
+    routing = true;
+    loadedFiles.set(snapshot.id, await loadManifest(snapshot));
+    if (thisRoute !== routeCount) return;
+    routing = false;
+
+    const target = resolve(snapshot, page);
+    current = { snapshot, page: target.page };
+    showNotice(
+      target.missing === null ? null : `${displayPath(target.missing)} isn't in this snapshot, so here's its homepage instead.`,
+      target.page
+    );
+
+    const url = new URL(fileFromPage(target.page), siteBase(snapshot)).href;
+    let shown = null;
+    try {
+      shown = frame.contentWindow.location.href;
+    } catch {
+      // The frame is showing another site
+    }
+
+    // replace, so the frame doesn't add a step to the back button's history
+    if (shown === null || withoutHash(shown) !== withoutHash(url)) frame.contentWindow.location.replace(url);
+    showPage();
+  }
+
+  /**
+   * Opens links that leave the snapshot, such as to other sites, in a new
+   * tab, rather than in the frame.
+   */
+  function watchLinks(doc, snapshot) {
+    doc.addEventListener('click', event => {
+      const link = typeof event.target?.closest === 'function' ? event.target.closest('a[href], area[href]') : null;
+      if (!link) return;
+
+      let url;
+      try {
+        url = new URL(link.getAttribute('href'), doc.baseURI);
+      } catch {
+        return;
+      }
+
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+      if (url.origin === location.origin && url.pathname.startsWith(siteBase(snapshot).pathname)) return;
+
+      const target = link.getAttribute('target');
+      if (target && target !== '_self') return;
+
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noopener');
+    }, true);
+  }
+
+  /** Keeps the banner and address in step as you browse inside the frame. */
+  frame.addEventListener('load', () => {
+    let url;
+    try {
+      url = new URL(frame.contentWindow.location.href);
+    } catch {
+      // The frame is showing another site
+      url = null;
+    }
+
+    if (url && url.protocol === 'about:') return;
+
+    const relative = url && url.origin === location.origin && url.pathname.startsWith(snapshotsBase.pathname)
+      ? url.pathname.slice(snapshotsBase.pathname.length)
+      : null;
+    const match = relative === null ? null : /^([^/]+)\/site\/(.*)$/.exec(relative);
+    const snapshot = match ? snapshots.find(s => s.id === match[1]) : null;
+
+    if (snapshot) {
+      try {
+        watchLinks(frame.contentDocument, snapshot);
+      } catch (error) {
+        console.warn('Couldn\'t watch the page\'s links:', error);
+      }
+    }
+
+    // route() will show the right page once its manifest has loaded
+    if (routing || !current) return;
+
+    if (!snapshot) {
+      current = { snapshot: current.snapshot, page: null };
+      showNotice(null, null);
+      showPage();
+      return;
+    }
+
+    if (snapshot !== current.snapshot) showSnapshot(snapshot);
+
+    const page = pageFromFile(match[2]);
+    current = { snapshot, page };
+
+    if (isInSnapshot(snapshot, page) === false) {
+      showNotice(`${displayPath(page)} isn't in this snapshot.`, page);
+    } else if (noticePage !== null && page !== noticePage) {
+      showNotice(null, null);
+    }
+
+    showPage();
+  });
+
+  picker.addEventListener('change', () => {
+    const page = current?.page ?? '';
+    location.hash = `#${picker.value}/${page}`;
+  });
+
+  function renderSnapshots() {
+    let host = null;
+    try {
+      host = new URL(snapshots[0].root).host;
+    } catch {
+      // No root, so keep the generic heading
+    }
+
+    if (host) heading.textContent = `Archive of ${host}`;
+    document.title = heading.textContent;
+
+    lede.textContent = `${count(snapshots.length, 'snapshot', 'snapshots')}, newest first. Times are in UTC.`;
+    lede.hidden = false;
+
+    for (const snapshot of snapshots) {
+      const isIncomplete = snapshot.status === 'incomplete';
+      const pages = Number.isInteger(snapshot.pageCount) ? count(snapshot.pageCount, 'page', 'pages') : null;
+      const failed = Array.isArray(snapshot.failedAddresses) ? snapshot.failedAddresses.length : 0;
+
+      const link = document.createElement('a');
+      link.href = `#${snapshot.id}/`;
+
+      const when = document.createElement('time');
+      when.className = 'when';
+      when.dateTime = String(snapshot.startedAt ?? '');
+      when.textContent = formatTime(snapshot);
+      link.append(when);
+
+      if (pages) {
+        const meta = document.createElement('span');
+        meta.className = 'meta';
+        meta.textContent = pages;
+        link.append(meta);
+      }
+
+      if (isIncomplete) {
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = failed ? `Incomplete: ${failed} missing` : 'Incomplete';
+        badge.title = failed
+          ? `${count(failed, 'address', 'addresses')} couldn't be archived`
+          : 'Some addresses couldn\'t be archived';
+        link.append(badge);
+      }
+
+      const item = document.createElement('li');
+      item.append(link);
+      list.append(item);
+
+      const option = document.createElement('option');
+      option.value = snapshot.id;
+      option.textContent = [formatTime(snapshot), pages, isIncomplete ? 'incomplete' : null].filter(Boolean).join(' · ');
+      picker.append(option);
+    }
+
+    list.hidden = false;
+  }
+
+  async function start() {
+    let index;
+
+    try {
+      const response = await fetch(indexUrl, { cache: 'no-cache' });
+
+      if (response.status === 404) {
+        status.textContent = 'No snapshots have been published yet.';
+        return;
+      }
+
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      index = await response.json();
+    } catch (error) {
+      status.textContent = `Couldn't load the list of snapshots (${error.message}).`;
+      status.classList.add('error');
+      return;
+    }
+
+    const time = snapshot => {
+      const ms = Date.parse(snapshot.startedAt);
+      return Number.isNaN(ms) ? 0 : ms;
+    };
+
+    snapshots = (Array.isArray(index?.snapshots) ? index.snapshots : [])
+      .filter(snapshot => snapshot && typeof snapshot.id === 'string' && /^[^/#?]+$/.test(snapshot.id))
+      .sort((a, b) => time(b) - time(a) || b.id.localeCompare(a.id, 'en', { numeric: true }));
+
+    if (snapshots.length === 0) {
+      status.textContent = 'No snapshots have been published yet.';
+      return;
+    }
+
+    status.hidden = true;
+    renderSnapshots();
+    window.addEventListener('hashchange', route);
+    route();
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

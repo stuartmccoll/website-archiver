@@ -204,8 +204,9 @@ namespace WebsiteArchiver
 
         /// <summary>
         /// Claims a folder for the snapshot, uploads its files, then its
-        /// manifest, then adds it to the index. The index is written last,
-        /// so a snapshot that couldn't be fully uploaded is never listed.
+        /// manifest, then the viewer, then adds it to the index. The index
+        /// is written last, so a snapshot that couldn't be fully uploaded
+        /// is never listed.
         /// </summary>
         /// <param name="storage">Where to upload the snapshot.</param>
         /// <param name="manifest">The snapshot's manifest. Its ID is
@@ -252,6 +253,10 @@ namespace WebsiteArchiver
                 BinaryData.FromString(JsonSerializer.Serialize(manifest, JsonOptions)),
                 JsonContentType
             );
+
+            // Before the index, so by the time a snapshot is listed, the
+            // viewer that understands its format is already live
+            await Viewer.Publish(storage);
 
             Console.WriteLine($"Adding {manifest.Id} to {IndexBlobName}");
 
