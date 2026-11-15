@@ -43,7 +43,8 @@ namespace WebsiteArchiver
         /// Reads the configuration from environment variables.
         /// </summary>
         /// <exception cref="InvalidOperationException">DOMAIN isn't set to
-        /// an absolute http or https URL.</exception>
+        /// an absolute http or https URL, or the storage configuration is
+        /// missing or invalid.</exception>
         public Archiver()
         {
             // Check DOMAIN first, so a missing value is reported clearly
@@ -73,10 +74,15 @@ namespace WebsiteArchiver
         /// every file they use on the same host is captured.
         /// </summary>
         /// <returns>An awaitable Task.</returns>
-        /// <exception cref="InvalidOperationException">The homepage couldn't
-        /// be fetched, so there is nothing to archive.</exception>
+        /// <exception cref="InvalidOperationException">Signing in to
+        /// storage failed, or the homepage couldn't be fetched, so there is
+        /// nothing to archive.</exception>
         async public Task Crawl()
         {
+            // Before crawling, so a sign-in problem fails the run straight
+            // away, while the workflow's short-lived token is still valid
+            await this.blobStorageClient.SignIn();
+
             DateTimeOffset startedAt = DateTimeOffset.UtcNow;
             this.SnapshotId = Snapshot.CreateId(startedAt);
 

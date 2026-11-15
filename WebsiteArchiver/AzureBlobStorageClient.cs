@@ -1,6 +1,11 @@
 ﻿using System;
+using System.IO;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Azure;
+using Azure.Core;
+using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 
@@ -8,21 +13,76 @@ namespace WebsiteArchiver
 {
     /// <summary>
     /// Uploads to the blob container named by
-    /// AZURE_BLOB_STORAGE_CONTAINER_NAME, in the account given by
-    /// AZURE_BLOB_STORAGE_CONNECTION_STRING.
+    /// AZURE_BLOB_STORAGE_CONTAINER_NAME. The storage account is given
+    /// either by AZURE_BLOB_STORAGE_CONNECTION_STRING, or by
+    /// AZURE_BLOB_STORAGE_ENDPOINT, which signs in with workload identity
+    /// (AZURE_TENANT_ID, AZURE_CLIENT_ID and AZURE_FEDERATED_TOKEN_FILE),
+    /// as the archival workflow does with its GitHub OIDC token.
     /// </summary>
     class AzureBlobStorageClient
     {
         private const int MaxUpdateAttempts = 10;
 
+        private const string ConnectionStringVariable = "AZURE_BLOB_STORAGE_CONNECTION_STRING";
+        private const string EndpointVariable = "AZURE_BLOB_STORAGE_ENDPOINT";
+        private const string ContainerNameVariable = "AZURE_BLOB_STORAGE_CONTAINER_NAME";
+        private const string TokenFileVariable = "AZURE_FEDERATED_TOKEN_FILE";
+
+        // The variables WorkloadIdentityCredential reads
+        private static readonly string[] WorkloadIdentityVariables =
+        {
+            "AZURE_TENANT_ID",
+            "AZURE_CLIENT_ID",
+            TokenFileVariable,
+        };
+
+        // The scope the Blob Storage SDK requests tokens for, so the token
+        // fetched by SignIn is the one its uploads reuse
+        private static readonly TokenRequestContext StorageTokenRequest = new(
+            new[] { "https://storage.azure.com/.default" }
+        );
+
         private readonly BlobContainerClient blobContainerClient;
+        private readonly TokenCredential credential;
 
         /// <summary>
-        /// Creates a client for the configured container.
+        /// Creates a client for the configured container. Nothing is sent
+        /// until the client is used.
         /// </summary>
+        /// <exception cref="InvalidOperationException">The storage
+        /// configuration is missing or invalid.</exception>
         public AzureBlobStorageClient()
         {
-            this.blobContainerClient = GetBlobContainerClient();
+            (this.blobContainerClient, this.credential) = CreateBlobContainerClient();
+        }
+
+        /// <summary>
+        /// Signs in now, if the client uses workload identity, so a problem
+        /// is reported before the crawl rather than after it. The token is
+        /// cached and reused by every upload. This matters because the
+        /// GitHub OIDC token in AZURE_FEDERATED_TOKEN_FILE expires after a
+        /// few minutes, while the Azure token it's exchanged for lasts
+        /// about an hour. Does nothing for a connection string.
+        /// </summary>
+        /// <returns>An awaitable Task.</returns>
+        /// <exception cref="InvalidOperationException">Signing in
+        /// failed.</exception>
+        public async Task SignIn()
+        {
+            if (this.credential == null)
+                return;
+
+            try
+            {
+                await this.credential.GetTokenAsync(StorageTokenRequest, CancellationToken.None);
+            }
+            catch (AuthenticationFailedException exception)
+            {
+                throw new InvalidOperationException(
+                    $"Couldn't sign in to Azure Storage with workload identity: {exception.Message}",
+                    exception
+                );
+            }
         }
 
         /// <summary>
@@ -166,21 +226,82 @@ namespace WebsiteArchiver
         }
 
         /// <summary>
-        /// Initialises the BlobContainerClient used for every request.
+        /// Creates the BlobContainerClient used for every request, from the
+        /// environment variables.
         /// </summary>
-        /// <returns>A configured BlobContainerClient.</returns>
-        private static BlobContainerClient GetBlobContainerClient()
+        /// <returns>The container client, and the credential it signs in
+        /// with, or null for a connection string.</returns>
+        /// <exception cref="InvalidOperationException">The storage
+        /// configuration is missing or invalid.</exception>
+        private static (BlobContainerClient Client, TokenCredential Credential) CreateBlobContainerClient()
         {
-            string connection = Environment.GetEnvironmentVariable(
-                "AZURE_BLOB_STORAGE_CONNECTION_STRING"
-            );
-            string containerName = Environment.GetEnvironmentVariable(
-                "AZURE_BLOB_STORAGE_CONTAINER_NAME"
-            );
+            string connectionString = Read(ConnectionStringVariable);
+            string endpoint = Read(EndpointVariable);
+            string containerName = Read(ContainerNameVariable);
 
-            BlobServiceClient serviceClient = new BlobServiceClient(connection);
+            if (containerName == null)
+                throw new InvalidOperationException($"{ContainerNameVariable} isn't set");
 
-            return serviceClient.GetBlobContainerClient(containerName);
+            if (connectionString != null && endpoint != null)
+            {
+                throw new InvalidOperationException(
+                    $"Both {ConnectionStringVariable} and {EndpointVariable} are set, so it isn't clear which " +
+                    "storage account to use. Set only one"
+                );
+            }
+
+            if (connectionString != null)
+                return (new BlobServiceClient(connectionString).GetBlobContainerClient(containerName), null);
+
+            if (endpoint == null)
+            {
+                throw new InvalidOperationException(
+                    $"Neither {ConnectionStringVariable} nor {EndpointVariable} is set, so there's nowhere to " +
+                    "upload the snapshot"
+                );
+            }
+
+            // The SDK won't send a token over plain http
+            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri endpointUri) || endpointUri.Scheme != Uri.UriSchemeHttps)
+            {
+                throw new InvalidOperationException(
+                    $"{EndpointVariable} must be an https URL, such as https://<account>.blob.core.windows.net/, " +
+                    $"but it's {endpoint}"
+                );
+            }
+
+            string[] missing = WorkloadIdentityVariables.Where(name => Read(name) == null).ToArray();
+
+            if (missing.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    $"{EndpointVariable} is set, so the archiver signs in with workload identity, but " +
+                    $"{string.Join(", ", missing)} {(missing.Length == 1 ? "isn't" : "aren't")} set"
+                );
+            }
+
+            string tokenFile = Read(TokenFileVariable);
+
+            if (!File.Exists(tokenFile))
+                throw new InvalidOperationException($"{TokenFileVariable} is {tokenFile}, which doesn't exist");
+
+            // Reads AZURE_TENANT_ID, AZURE_CLIENT_ID and
+            // AZURE_FEDERATED_TOKEN_FILE. Chosen over DefaultAzureCredential
+            // so it can't quietly sign in some other way.
+            TokenCredential credential = new WorkloadIdentityCredential();
+
+            return (new BlobServiceClient(endpointUri, credential).GetBlobContainerClient(containerName), credential);
+        }
+
+        /// <summary>
+        /// Reads an environment variable.
+        /// </summary>
+        /// <param name="name">The variable's name.</param>
+        /// <returns>Its value, or null if it's unset or blank.</returns>
+        private static string Read(string name)
+        {
+            string value = Environment.GetEnvironmentVariable(name);
+            return string.IsNullOrWhiteSpace(value) ? null : value;
         }
     }
 }
