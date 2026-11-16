@@ -37,7 +37,7 @@ services:
   # snapshot straight from Azurite, as it would from the $web container in
   # production.
   create-container:
-    image: mcr.microsoft.com/azure-cli:2.92.0
+    image: mcr.microsoft.com/azure-cli:2.93.0
     depends_on:
       - azurite
     environment:
@@ -68,7 +68,7 @@ services:
 
   # Lists what the archiver uploaded. Only runs when asked for by name.
   list-blobs:
-    image: mcr.microsoft.com/azure-cli:2.92.0
+    image: mcr.microsoft.com/azure-cli:2.93.0
     profiles: [tools]
     depends_on:
       - azurite
@@ -79,7 +79,7 @@ services:
   # Prints the address of the latest snapshot in the viewer, to open in a
   # browser. Only runs when asked for by name.
   snapshot-url:
-    image: mcr.microsoft.com/azure-cli:2.92.0
+    image: mcr.microsoft.com/azure-cli:2.93.0
     profiles: [tools]
     depends_on:
       - azurite
