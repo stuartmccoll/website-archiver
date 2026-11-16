@@ -14,7 +14,7 @@ COPY . .
 
 RUN dotnet publish ./WebsiteArchiver.csproj -c Release -o ./app/bin/Release/net
 
-FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/runtime:11.0 AS runtime
 
 # Links the image published to ghcr.io back to this repository
 LABEL org.opencontainers.image.source="https://github.com/stuartmccoll/website-archiver"
